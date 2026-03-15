@@ -46,7 +46,7 @@ app.use((req, res, next) => {
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'https://film-diary-frontend1-66rcpd1mk-artz000s-projects.vercel.app/', // замените на свой домен фронтенда
+    'https://film-diary-frontend1-8p4szkcgk-artz000s-projects.vercel.app/', // замените на свой домен фронтенда
   ],
   credentials: true,
 }));
