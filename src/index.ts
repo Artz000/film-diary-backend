@@ -15,6 +15,17 @@ const KINOPOISK_API_URL = 'https://api.kinopoisk.dev/v1.4';
 
 // Prisma клиент
 export const prisma = new PrismaClient();
+async function connectDB() {
+  try {
+    await prisma.$connect();
+    console.log('✅ База данных подключена');
+  } catch (error) {
+    console.error('❌ Ошибка подключения к БД:', error);
+    // Не выходим из процесса, чтобы платформа могла показать ошибку
+    // но можно и process.exit(1), если без БД работа невозможна
+  }
+}
+connectDB();
 
 // Middleware
 app.use(cors({
