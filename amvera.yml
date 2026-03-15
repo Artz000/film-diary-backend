@@ -1,6 +1,5 @@
 meta:
   name: film-diary-backend
-  environment: nodejs
   toolchain:
     name: nodejs
     version: 18
