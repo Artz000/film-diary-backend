@@ -42,20 +42,36 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS
+// Настройка CORS — разрешаем все нужные домены
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://localhost:5173',
+  'https://film-diary-frontend1.vercel.app',
+  'https://film-diary-frontend1-lhdnkml0c-artz000s-projects.vercel.app' // твой текущий фронт
+];
+
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://film-diary-frontend1-8p4szkcgk-artz000s-projects.vercel.app/', // замените на свой домен фронтенда
-  ],
+  origin: (origin, callback) => {
+    // разрешаем запросы без origin (например, с мобильных приложений)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`Blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // разрешённые методы
-  allowedHeaders: ['Content-Type', 'Authorization', 'user-id'] // заголовки, которые могут быть отправлены
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'user-id']
 }));
+
+// Явно обрабатываем OPTIONS-запросы (preflight)
+app.options('*', cors());
+
 app.use(express.json());
 
 // ------------------------------
-// Health check endpoints (явные)
+// Health check endpoints (для платформы)
 // ------------------------------
 app.get('/', (req, res) => {
   res.send('FilmDiary backend is running');
@@ -111,7 +127,7 @@ app.post('/api/auth', async (req, res) => {
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
-  // ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ ПОДПИСИ, ЧТОБЫ УБРАТЬ ФАКТОР ВАЛИДАЦИИ
+  // ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ ПОДПИСИ ДЛЯ ТЕСТА
   // if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
   //   return res.status(401).json({ error: 'Invalid signature' });
   // }
@@ -163,6 +179,8 @@ app.post('/api/auth', async (req, res) => {
 // ------------------------------
 // Эндпоинты для работы с фильмами пользователя
 // ------------------------------
+
+// Добавление фильма в коллекцию
 app.post('/api/films', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -206,6 +224,7 @@ app.post('/api/films', async (req, res) => {
   }
 });
 
+// Получение фильмов пользователя (с фильтром по статусу)
 app.get('/api/users/:userId/films', async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
@@ -239,6 +258,7 @@ app.get('/api/users/:userId/films', async (req, res) => {
   }
 });
 
+// Удаление фильма из коллекции
 app.delete('/api/films/:tmdbId', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -271,8 +291,10 @@ app.delete('/api/films/:tmdbId', async (req, res) => {
 });
 
 // ------------------------------
-// Эндпоинты для Кинопоиска
+// Эндпоинты для работы с Кинопоиском
 // ------------------------------
+
+// Поиск фильмов
 app.get('/api/kinopoisk/search', async (req, res) => {
   try {
     const { query, limit = 10, page = 1 } = req.query;
@@ -323,6 +345,7 @@ app.get('/api/kinopoisk/search', async (req, res) => {
   }
 });
 
+// Получение деталей фильма по ID
 app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -390,6 +413,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
 
+// Обработка сигналов завершения
 const gracefulShutdown = () => {
   console.log('⏳ Получен сигнал завершения, закрываем сервер...');
   server.close(async () => {
