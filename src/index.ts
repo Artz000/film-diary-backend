@@ -294,6 +294,40 @@ app.delete('/api/films/:tmdbId', async (req, res) => {
 // Эндпоинты для работы с Кинопоиском
 // ------------------------------
 
+// Получение ленты (последние рецензии)
+app.get('/api/feed', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
+    // Для MVP просто берём последние 20 рецензий всех пользователей
+    const reviews = await prisma.review.findMany({
+      take: 20,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: true,
+        film: true
+      }
+    });
+
+    const feed = reviews.map(review => ({
+      id: review.id,
+      userName: review.user.firstName || review.user.username || 'Неизвестный',
+      filmTitle: review.film.title,
+      rating: review.rating,
+      reviewText: review.reviewText,
+      createdAt: review.createdAt
+    }));
+
+    res.json(feed); // возвращаем массив
+  } catch (error) {
+    console.error('Error fetching feed:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Поиск фильмов
 app.get('/api/kinopoisk/search', async (req, res) => {
   try {
