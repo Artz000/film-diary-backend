@@ -1,0 +1,19 @@
+version: '1'
+name: film-diary-backend
+services:
+  - name: app
+    type: nodejs
+    build: |
+      npm install
+      npx prisma generate
+      npm run build
+    start: npm start
+    env:
+      - name: PORT
+        value: 3000
+      - name: DATABASE_URL
+        value: "postgresql://user1:30070430704@rc1b-boh1h237qnv8enfm.mdb.yandexcloud.net:6432/db1?schema=public&sslmode=require&sslrootcert=/app/certs/root.crt"
+      - name: BOT_TOKEN
+        value: "6325446803:A4EKLvD5sSPwADPMXQG7pUhF_ko0y_dC3-E"
+      - name: KINOPOISK_API_KEY
+        value: "TAQMGHH-A62MCCD-GRMWKNF-VEMCJ34"
