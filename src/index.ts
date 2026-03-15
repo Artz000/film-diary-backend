@@ -15,29 +15,20 @@ const KINOPOISK_API_URL = 'https://api.kinopoisk.dev/v1.4';
 
 // Prisma клиент
 export const prisma = new PrismaClient();
-async function connectDB() {
-  try {
-    await prisma.$connect();
-    console.log('✅ База данных подключена');
-  } catch (error) {
-    console.error('❌ Ошибка подключения к БД:', error);
-    // Не выходим из процесса, чтобы платформа могла показать ошибку
-    // но можно и process.exit(1), если без БД работа невозможна
-  }
-}
-connectDB();
 
 // Middleware
 app.use(cors({
   origin: [
-    'https://film-diary-frontend1-66rcpd1mk-artz000s-projects.vercel.app', // твой фронтенд
-    'http://localhost:5173'
+    'http://localhost:5173',
+    'https://film-diary-frontend.vercel.app', // замените на свой домен фронтенда
   ],
   credentials: true,
 }));
 app.use(express.json());
 
+// ------------------------------
 // Вспомогательная функция валидации initData
+// ------------------------------
 function validateTelegramWebAppData(initData: string, botToken: string): boolean {
   const params = new URLSearchParams(initData);
   const hash = params.get('hash');
@@ -62,10 +53,16 @@ function validateTelegramWebAppData(initData: string, botToken: string): boolean
 }
 
 // ------------------------------
-// 1. Тестовый маршрут
+// Health check endpoints (для платформы)
 // ------------------------------
 app.get('/', (req, res) => {
+  console.log('Health check request received on /');
   res.send('FilmDiary backend is running');
+});
+
+app.get('/health', (req, res) => {
+  console.log('Health check request received on /health');
+  res.status(200).send('OK');
 });
 
 // ------------------------------
@@ -135,6 +132,7 @@ app.post('/api/auth', async (req, res) => {
 // 3. Эндпоинты для работы с фильмами пользователя
 // ------------------------------
 
+// Добавление фильма в коллекцию
 app.post('/api/films', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -178,6 +176,7 @@ app.post('/api/films', async (req, res) => {
   }
 });
 
+// Получение фильмов пользователя (с фильтром по статусу)
 app.get('/api/users/:userId/films', async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
@@ -211,6 +210,7 @@ app.get('/api/users/:userId/films', async (req, res) => {
   }
 });
 
+// Удаление фильма из коллекции
 app.delete('/api/films/:tmdbId', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -246,6 +246,7 @@ app.delete('/api/films/:tmdbId', async (req, res) => {
 // 4. Эндпоинты для работы с Кинопоиском
 // ------------------------------
 
+// Поиск фильмов
 app.get('/api/kinopoisk/search', async (req, res) => {
   try {
     const { query, limit = 10, page = 1 } = req.query;
@@ -296,6 +297,7 @@ app.get('/api/kinopoisk/search', async (req, res) => {
   }
 });
 
+// Получение деталей фильма по ID
 app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -336,26 +338,22 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
 });
 
 // ------------------------------
-// 5. Запуск сервера с обработкой сигналов
+// Проверка подключения к базе данных
 // ------------------------------
-const server = app.listen(PORT, '0.0.0.0', () => {
+async function connectDB() {
+  try {
+    await prisma.$connect();
+    console.log('✅ База данных подключена');
+  } catch (error) {
+    console.error('❌ Ошибка подключения к БД:', error);
+    // Не выходим, чтобы платформа могла залогировать ошибку
+  }
+}
+connectDB();
+
+// ------------------------------
+// Запуск сервера
+// ------------------------------
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер запущен на порту ${PORT}`);
-});
-
-process.on('SIGTERM', () => {
-  console.log('Получен SIGTERM, закрываем сервер...');
-  server.close(() => {
-    console.log('Сервер остановлен');
-    process.exit(0);
-  });
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('Неперехваченное исключение:', err);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Необработанный промис:', err);
-  process.exit(1);
 });
