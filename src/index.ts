@@ -8,7 +8,7 @@ import crypto from 'crypto';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const KINOPOISK_API_KEY = process.env.KINOPOISK_API_KEY;
 const KINOPOISK_API_URL = 'https://api.kinopoisk.dev/v1.4';
@@ -19,17 +19,14 @@ export const prisma = new PrismaClient();
 // Middleware
 app.use(cors({
   origin: [
-    'http://localhost:5173',
-    'https://film-diary-frontend1-66rcpd1mk-artz000s-projects.vercel.app',
-    // добавьте сюда свой ngrok URL при необходимости
+    'https://film-diary-frontend1-66rcpd1mk-artz000s-projects.vercel.app', // твой фронтенд
+    'http://localhost:5173'
   ],
   credentials: true,
 }));
 app.use(express.json());
 
-// ------------------------------
 // Вспомогательная функция валидации initData
-// ------------------------------
 function validateTelegramWebAppData(initData: string, botToken: string): boolean {
   const params = new URLSearchParams(initData);
   const hash = params.get('hash');
@@ -66,23 +63,19 @@ app.get('/', (req, res) => {
 app.post('/api/auth', async (req, res) => {
   const { initData } = req.body;
 
-  // 1. Проверяем, что initData передан и является строкой
   if (typeof initData !== 'string' || initData.trim() === '') {
     return res.status(400).json({ error: 'initData required' });
   }
 
-  // 2. Проверяем наличие токена бота
   if (!BOT_TOKEN) {
     console.error('BOT_TOKEN is not defined in .env');
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
-  // 3. Валидируем подпись
   if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
-  // 4. Парсим данные пользователя
   const params = new URLSearchParams(initData);
   const userStr = params.get('user');
   if (!userStr) {
@@ -96,7 +89,6 @@ app.post('/api/auth', async (req, res) => {
     return res.status(400).json({ error: 'Invalid user data format' });
   }
 
-  // 5. Работа с базой данных
   try {
     let user = await prisma.user.findUnique({
       where: { tgId: String(tgUser.id) },
@@ -132,7 +124,6 @@ app.post('/api/auth', async (req, res) => {
 // 3. Эндпоинты для работы с фильмами пользователя
 // ------------------------------
 
-// Добавление фильма в коллекцию
 app.post('/api/films', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -145,7 +136,6 @@ app.post('/api/films', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Проверяем существование фильма
     let film = await prisma.film.findUnique({
       where: { tmdbId: Number(tmdbId) },
     });
@@ -160,7 +150,6 @@ app.post('/api/films', async (req, res) => {
       });
     }
 
-    // Создаём рецензию
     const review = await prisma.review.create({
       data: {
         userId: Number(userId),
@@ -178,7 +167,6 @@ app.post('/api/films', async (req, res) => {
   }
 });
 
-// Получение фильмов пользователя (с фильтром по статусу)
 app.get('/api/users/:userId/films', async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
@@ -212,7 +200,6 @@ app.get('/api/users/:userId/films', async (req, res) => {
   }
 });
 
-// Удаление фильма из коллекции
 app.delete('/api/films/:tmdbId', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -248,7 +235,6 @@ app.delete('/api/films/:tmdbId', async (req, res) => {
 // 4. Эндпоинты для работы с Кинопоиском
 // ------------------------------
 
-// Поиск фильмов
 app.get('/api/kinopoisk/search', async (req, res) => {
   try {
     const { query, limit = 10, page = 1 } = req.query;
@@ -299,7 +285,6 @@ app.get('/api/kinopoisk/search', async (req, res) => {
   }
 });
 
-// Получение деталей фильма по ID
 app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -340,8 +325,26 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
 });
 
 // ------------------------------
-// 5. Запуск сервера
+// 5. Запуск сервера с обработкой сигналов
 // ------------------------------
-app.listen(PORT, () => {
-  console.log(`Сервер запущен на http://localhost:${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Сервер запущен на порту ${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Получен SIGTERM, закрываем сервер...');
+  server.close(() => {
+    console.log('Сервер остановлен');
+    process.exit(0);
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Неперехваченное исключение:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Необработанный промис:', err);
+  process.exit(1);
 });
