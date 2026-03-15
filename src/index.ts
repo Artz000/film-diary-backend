@@ -49,6 +49,8 @@ app.use(cors({
     'https://film-diary-frontend1-8p4szkcgk-artz000s-projects.vercel.app/', // замените на свой домен фронтенда
   ],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // разрешённые методы
+  allowedHeaders: ['Content-Type', 'Authorization', 'user-id'] // заголовки, которые могут быть отправлены
 }));
 app.use(express.json());
 
