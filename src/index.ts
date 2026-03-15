@@ -337,23 +337,41 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   }
 });
 
+
+
+
 // ------------------------------
-// Проверка подключения к базе данных
-// ------------------------------
+// Запуск сервера
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Сервер запущен на порту ${PORT}`);
+});
+
+// Проверка БД
 async function connectDB() {
   try {
     await prisma.$connect();
     console.log('✅ База данных подключена');
   } catch (error) {
     console.error('❌ Ошибка подключения к БД:', error);
-    // Не выходим, чтобы платформа могла залогировать ошибку
   }
 }
 connectDB();
 
-// ------------------------------
-// Запуск сервера
-// ------------------------------
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
+// Обработка сигналов завершения
+process.on('SIGTERM', () => {
+  console.log('SIGTERM получен, закрываем сервер...');
+  server.close(() => {
+    console.log('Сервер закрыт');
+    prisma.$disconnect();
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT получен, закрываем сервер...');
+  server.close(() => {
+    console.log('Сервер закрыт');
+    prisma.$disconnect();
+    process.exit(0);
+  });
 });
