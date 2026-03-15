@@ -1,6 +1,9 @@
 meta:
   name: film-diary-backend
   environment: nodejs
+  toolchain:
+    name: nodejs
+    version: 18
   region: msk-0
 
 build:
