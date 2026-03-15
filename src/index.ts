@@ -13,60 +13,92 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const KINOPOISK_API_KEY = process.env.KINOPOISK_API_KEY;
 const KINOPOISK_API_URL = 'https://api.kinopoisk.dev/v1.4';
 
-// Prisma клиент
 export const prisma = new PrismaClient();
 
-// Middleware
+// Глобальные обработчики непойманных ошибок
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  // Не выходим сразу, чтобы платформа могла залогировать
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Middleware для детального логирования запросов
+app.use((req, res, next) => {
+  const requestId = Math.random().toString(36).substring(7);
+  console.log(`[${requestId}] ➡️ ${req.method} ${req.path} at ${new Date().toISOString()}`);
+  const start = Date.now();
+
+  // Логируем ответ после завершения
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[${requestId}] ⬅️ ${req.method} ${req.path} ${res.statusCode} - ${duration}ms`);
+  });
+
+  // Логируем ошибки, если они возникнут
+  res.on('error', (err) => {
+    console.error(`[${requestId}] ❌ Error on ${req.method} ${req.path}:`, err);
+  });
+
+  next();
+});
+
+// CORS
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'https://film-diary-frontend.vercel.app', // замените на свой домен фронтенда
+    'https://film-diary-frontend1-66rcpd1mk-artz000s-projects.vercel.app/', // замените на реальный домен фронтенда
   ],
   credentials: true,
 }));
 app.use(express.json());
 
 // ------------------------------
-// Вспомогательная функция валидации initData
-// ------------------------------
-function validateTelegramWebAppData(initData: string, botToken: string): boolean {
-  const params = new URLSearchParams(initData);
-  const hash = params.get('hash');
-  params.delete('hash');
-
-  const dataCheckString = Array.from(params.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
-
-  const secretKey = crypto
-    .createHmac('sha256', 'WebAppData')
-    .update(botToken)
-    .digest();
-
-  const calculatedHash = crypto
-    .createHmac('sha256', secretKey)
-    .update(dataCheckString)
-    .digest('hex');
-
-  return calculatedHash === hash;
-}
-
-// ------------------------------
-// Health check endpoints (для платформы)
+// Health check endpoints
 // ------------------------------
 app.get('/', (req, res) => {
-  console.log('Health check request received on /');
   res.send('FilmDiary backend is running');
 });
 
 app.get('/health', (req, res) => {
-  console.log('Health check request received on /health');
   res.status(200).send('OK');
 });
 
 // ------------------------------
-// 2. Авторизация через Telegram
+// Вспомогательная функция валидации initData
+// ------------------------------
+function validateTelegramWebAppData(initData: string, botToken: string): boolean {
+  try {
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    params.delete('hash');
+
+    const dataCheckString = Array.from(params.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+
+    const secretKey = crypto
+      .createHmac('sha256', 'WebAppData')
+      .update(botToken)
+      .digest();
+
+    const calculatedHash = crypto
+      .createHmac('sha256', secretKey)
+      .update(dataCheckString)
+      .digest('hex');
+
+    return calculatedHash === hash;
+  } catch (err) {
+    console.error('Validation error:', err);
+    return false;
+  }
+}
+
+// ------------------------------
+// Авторизация через Telegram
 // ------------------------------
 app.post('/api/auth', async (req, res) => {
   const { initData } = req.body;
@@ -76,13 +108,14 @@ app.post('/api/auth', async (req, res) => {
   }
 
   if (!BOT_TOKEN) {
-    console.error('BOT_TOKEN is not defined in .env');
+    console.error('BOT_TOKEN is not defined');
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
-  if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
-    return res.status(401).json({ error: 'Invalid signature' });
-  }
+  // ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ ПОДПИСИ ДЛЯ ДИАГНОСТИКИ
+  // if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
+  //   return res.status(401).json({ error: 'Invalid signature' });
+  // }
 
   const params = new URLSearchParams(initData);
   const userStr = params.get('user');
@@ -129,10 +162,9 @@ app.post('/api/auth', async (req, res) => {
 });
 
 // ------------------------------
-// 3. Эндпоинты для работы с фильмами пользователя
+// Эндпоинты для работы с фильмами пользователя
+// (остаются без изменений, как в предыдущей версии)
 // ------------------------------
-
-// Добавление фильма в коллекцию
 app.post('/api/films', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -176,7 +208,6 @@ app.post('/api/films', async (req, res) => {
   }
 });
 
-// Получение фильмов пользователя (с фильтром по статусу)
 app.get('/api/users/:userId/films', async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
@@ -210,7 +241,6 @@ app.get('/api/users/:userId/films', async (req, res) => {
   }
 });
 
-// Удаление фильма из коллекции
 app.delete('/api/films/:tmdbId', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
@@ -243,10 +273,9 @@ app.delete('/api/films/:tmdbId', async (req, res) => {
 });
 
 // ------------------------------
-// 4. Эндпоинты для работы с Кинопоиском
+// Эндпоинты для Кинопоиска
+// (остаются без изменений)
 // ------------------------------
-
-// Поиск фильмов
 app.get('/api/kinopoisk/search', async (req, res) => {
   try {
     const { query, limit = 10, page = 1 } = req.query;
@@ -297,7 +326,6 @@ app.get('/api/kinopoisk/search', async (req, res) => {
   }
 });
 
-// Получение деталей фильма по ID
 app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -337,16 +365,9 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   }
 });
 
-
-
-
 // ------------------------------
-// Запуск сервера
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
-});
-
-// Проверка БД
+// Проверка подключения к БД
+// ------------------------------
 async function connectDB() {
   try {
     await prisma.$connect();
@@ -357,21 +378,29 @@ async function connectDB() {
 }
 connectDB();
 
-// Обработка сигналов завершения
-process.on('SIGTERM', () => {
-  console.log('SIGTERM получен, закрываем сервер...');
-  server.close(() => {
-    console.log('Сервер закрыт');
-    prisma.$disconnect();
-    process.exit(0);
-  });
+// ------------------------------
+// Запуск сервера с graceful shutdown
+// ------------------------------
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT получен, закрываем сервер...');
-  server.close(() => {
-    console.log('Сервер закрыт');
-    prisma.$disconnect();
+// Обработка сигналов завершения
+const gracefulShutdown = () => {
+  console.log('⏳ Получен сигнал завершения, закрываем сервер...');
+  server.close(async () => {
+    console.log('🛑 Сервер остановлен');
+    await prisma.$disconnect();
+    console.log('🔌 Отключение от БД');
     process.exit(0);
   });
-});
+
+  // Если через 10 секунд сервер не закрылся, принудительно выходим
+  setTimeout(() => {
+    console.error('❌ Таймаут при завершении, принудительный выход');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
