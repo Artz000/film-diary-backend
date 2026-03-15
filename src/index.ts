@@ -20,7 +20,7 @@ export const prisma = new PrismaClient();
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'https://subpallial-prius-jaxson.ngrok-free.dev',
+    'https://film-diary-frontend1-66rcpd1mk-artz000s-projects.vercel.app',
     // добавьте сюда свой ngrok URL при необходимости
   ],
   credentials: true,
