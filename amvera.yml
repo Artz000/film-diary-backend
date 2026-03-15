@@ -1,29 +1,12 @@
 meta:
-  name: film-diary-backend
-  environment: nodejs
+  environment: node
   toolchain:
-    name: nodejs
+    name: npm
     version: 18
-  region: msk-0
-
 build:
-  commands:
-    - npm install
-    - npx prisma generate
-    - npm run build
-
-run:
+  artifacts:
+    '*': /
   command: npm start
-  ports:
-    - port: 3000
-      protocol: http
-
-env:
-  - name: PORT
-    value: 3000
-  - name: DATABASE_URL
-    value: "postgresql://user1:30070430704@rc1b-boh1h237qnv8enfm.mdb.yandexcloud.net:6432/db1?schema=public&sslmode=require&sslrootcert=/app/certs/root.crt"
-  - name: BOT_TOKEN
-    value: "6325446803:A4EKLvD5sSPwADPMXQG7pUhF_ko0y_dC3-E"
-  - name: KINOPOISK_API_KEY
-    value: "TAQMGHH-A62MCCD-GRMWKNF-VEMCJ34"
+run:
+  persistenceMount: /data
+  containerPort: 80
