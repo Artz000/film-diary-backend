@@ -180,6 +180,8 @@ app.post('/api/auth', async (req, res) => {
 // Эндпоинты для работы с фильмами пользователя
 // ------------------------------
 
+
+// Добавление фильма в коллекцию
 // Добавление фильма в коллекцию
 app.post('/api/films', async (req, res) => {
   try {
@@ -193,6 +195,33 @@ app.post('/api/films', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    const userIdNum = Number(userId);
+    if (isNaN(userIdNum)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    // --- НАЧАЛО ДОБАВЛЕННОГО КОДА ---
+    // Проверяем, существует ли пользователь в БД, и создаём, если нет
+    let user = await prisma.user.findUnique({
+      where: { id: userIdNum },
+    });
+
+    if (!user) {
+      console.log(`User with id ${userIdNum} not found, creating...`);
+      user = await prisma.user.create({
+        data: {
+          id: userIdNum,
+          tgId: String(userIdNum), // для мок-режима используем тот же id как tgId
+          firstName: 'Тестовый',
+          lastName: 'Пользователь',
+          username: `user_${userIdNum}`,
+        },
+      });
+      console.log(`User created with id ${user.id}`);
+    }
+    // --- КОНЕЦ ДОБАВЛЕННОГО КОДА ---
+
+    // Проверяем существование фильма
     let film = await prisma.film.findUnique({
       where: { tmdbId: Number(tmdbId) },
     });
@@ -207,9 +236,10 @@ app.post('/api/films', async (req, res) => {
       });
     }
 
+    // Создаём рецензию
     const review = await prisma.review.create({
       data: {
-        userId: Number(userId),
+        userId: userIdNum, // используем проверенный userId
         filmId: film.id,
         status,
         rating: status === 'watched' ? rating : null,
