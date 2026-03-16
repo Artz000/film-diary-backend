@@ -274,6 +274,7 @@ app.get('/api/users/:userId/films', async (req, res) => {
     const films = reviews.map((review) => ({
       id: review.film.tmdbId,
       title: review.film.title,
+      year: review.film.year,     
       poster: review.film.posterPath,
       status: review.status,
       rating: review.rating,
@@ -344,7 +345,8 @@ app.get('/api/feed', async (req, res) => {
 
     const feed = reviews.map(review => ({
       id: review.id,
-      userName: review.user.firstName || review.user.username || 'Неизвестный',
+      userId: review.userId,  
+      userName: review.user.firstName || review.user.username || 'Пользователь',
       filmTitle: review.film.title,
       rating: review.rating,
       reviewText: review.reviewText,
