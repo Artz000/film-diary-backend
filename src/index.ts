@@ -184,7 +184,7 @@ app.post('/api/auth', async (req, res) => {
 app.post('/api/films', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
-    const { tmdbId, title, posterPath, year, genres, status, rating, reviewText } = req.body;
+    const { tmdbId, title, posterPath, year, genres, status, rating, reviewText,isFavorite = false  } = req.body;
 
     // Проверка обязательных полей
     if (!userId) {
@@ -242,8 +242,10 @@ app.post('/api/films', async (req, res) => {
         rating: status === 'watched' ? rating : null,
         reviewText: reviewText || null,
         isPublic: false, // по умолчанию рецензия не публикуется в ленте
+        isFavorite, // добавлено
       },
     });
+
 
     res.status(201).json({ success: true, reviewId: review.id });
   } catch (error) {
@@ -300,10 +302,12 @@ app.delete('/api/reviews/:id/like', async (req, res) => {
 app.get('/api/users/:userId/films', async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
-    const { status } = req.query;
+    const { status, favorite } = req.query;
 
-    const whereCondition: any = { userId };
-    if (status && typeof status === 'string') {
+    let whereCondition: any = { userId };
+    if (favorite === 'true') {
+      whereCondition.isFavorite = true;
+    } else if (status && typeof status === 'string') {
       whereCondition.status = status;
     }
 
@@ -315,15 +319,16 @@ app.get('/api/users/:userId/films', async (req, res) => {
 
     const films = reviews.map((review) => ({
       id: review.film.tmdbId,
+      reviewId: review.id,
       title: review.film.title,
       poster: review.film.posterPath,
       year: review.film.year,
-      genres: review.film.genres as string[] || [],
+      genres: review.film.genres,
       status: review.status,
       rating: review.rating,
       reviewText: review.reviewText,
-      reviewId: review.id,
       isPublic: review.isPublic,
+      isFavorite: review.isFavorite,
       createdAt: review.createdAt,
     }));
 
@@ -452,6 +457,34 @@ app.patch('/api/reviews/:id/rating', async (req, res) => {
     res.json({ success: true, rating: updated.rating });
   } catch (error) {
     console.error('Error updating rating:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Переключение избранного
+app.patch('/api/reviews/:id/favorite', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    const reviewId = parseInt(req.params.id);
+    const { isFavorite } = req.body;
+
+    if (!userId) return res.status(401).json({ error: 'User ID required' });
+    if (typeof isFavorite !== 'boolean') return res.status(400).json({ error: 'isFavorite must be boolean' });
+
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review) return res.status(404).json({ error: 'Review not found' });
+    if (review.userId !== Number(userId)) return res.status(403).json({ error: 'Forbidden' });
+
+    const updated = await prisma.review.update({
+      where: { id: reviewId },
+      data: { isFavorite },
+    });
+
+    res.json({ success: true, isFavorite: updated.isFavorite });
+  } catch (error) {
+    console.error('Error updating favorite:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -36,11 +36,12 @@ model Review {
   userId     Int
   film       Film     @relation(fields: [filmId], references: [id])
   filmId     Int
-  status     String
+  status     String   // watched, want, favorite (статус может остаться, но теперь у нас отдельный isFavorite)
   rating     Int?
   reviewText String?
   createdAt  DateTime @default(now())
   isPublic   Boolean  @default(false)
+  isFavorite Boolean  @default(false)
   likes      Like[]
 }
 
