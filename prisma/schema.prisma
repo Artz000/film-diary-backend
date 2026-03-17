@@ -22,7 +22,8 @@ model Film {
   tmdbId     Int      @unique
   title      String
   posterPath String?
-  year       String?
+  year       String?   // добавлено
+  genres     String[]  // добавлено (массив строк)
   reviews    Review[]
 }
 

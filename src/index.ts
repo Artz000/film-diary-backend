@@ -180,13 +180,11 @@ app.post('/api/auth', async (req, res) => {
 // Эндпоинты для работы с фильмами пользователя
 // ------------------------------
 
-
-// Добавление фильма в коллекцию
 // Добавление фильма в коллекцию
 app.post('/api/films', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
-    const { tmdbId, title, posterPath, status, rating, reviewText } = req.body;
+    const { tmdbId, title, posterPath, year, genres, status, rating, reviewText } = req.body;
 
     if (!userId) {
       return res.status(401).json({ error: 'User ID required' });
@@ -200,28 +198,21 @@ app.post('/api/films', async (req, res) => {
       return res.status(400).json({ error: 'Invalid user ID' });
     }
 
-    // --- НАЧАЛО ДОБАВЛЕННОГО КОДА ---
-    // Проверяем, существует ли пользователь в БД, и создаём, если нет
-    let user = await prisma.user.findUnique({
-      where: { id: userIdNum },
-    });
-
+    // Проверка/создание пользователя
+    let user = await prisma.user.findUnique({ where: { id: userIdNum } });
     if (!user) {
-      console.log(`User with id ${userIdNum} not found, creating...`);
       user = await prisma.user.create({
         data: {
           id: userIdNum,
-          tgId: String(userIdNum), // для мок-режима используем тот же id как tgId
+          tgId: String(userIdNum),
           firstName: 'Тестовый',
           lastName: 'Пользователь',
           username: `user_${userIdNum}`,
         },
       });
-      console.log(`User created with id ${user.id}`);
     }
-    // --- КОНЕЦ ДОБАВЛЕННОГО КОДА ---
 
-    // Проверяем существование фильма
+    // Поиск или создание фильма с year и genres
     let film = await prisma.film.findUnique({
       where: { tmdbId: Number(tmdbId) },
     });
@@ -232,14 +223,16 @@ app.post('/api/films', async (req, res) => {
           tmdbId: Number(tmdbId),
           title,
           posterPath,
+          year: year || null,
+          genres: genres || [],
         },
       });
     }
 
-    // Создаём рецензию
+    // Создание рецензии
     const review = await prisma.review.create({
       data: {
-        userId: userIdNum, // используем проверенный userId
+        userId: userIdNum,
         filmId: film.id,
         status,
         rating: status === 'watched' ? rating : null,
@@ -274,13 +267,15 @@ app.get('/api/users/:userId/films', async (req, res) => {
     const films = reviews.map((review) => ({
       id: review.film.tmdbId,
       title: review.film.title,
-      year: review.film.year,     
       poster: review.film.posterPath,
+      year: review.film.year,
+      genres: review.film.genres,
       status: review.status,
       rating: review.rating,
       reviewText: review.reviewText,
       createdAt: review.createdAt,
     }));
+          
 
     res.json(films);
   } catch (error) {
@@ -317,6 +312,49 @@ app.delete('/api/films/:tmdbId', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting film:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Обновление статуса фильма (например, из "хочу посмотреть" в "просмотрено")
+app.patch('/api/films/:tmdbId', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    const tmdbId = parseInt(req.params.tmdbId);
+    const { status, rating, reviewText } = req.body; // новый статус и опционально оценка/отзыв
+
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
+    const film = await prisma.film.findUnique({
+      where: { tmdbId },
+    });
+
+    if (!film) {
+      return res.status(404).json({ error: 'Film not found' });
+    }
+
+    // Обновляем рецензию (предполагаем, что у пользователя только одна рецензия на фильм)
+    const updatedReview = await prisma.review.updateMany({
+      where: {
+        userId: Number(userId),
+        filmId: film.id,
+      },
+      data: {
+        status,
+        rating: status === 'watched' ? rating : null,
+        reviewText: reviewText || undefined,
+      },
+    });
+
+    if (updatedReview.count === 0) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating film status:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
