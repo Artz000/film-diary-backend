@@ -128,9 +128,9 @@ app.post('/api/auth', async (req, res) => {
   }
 
   // ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ ПОДПИСИ ДЛЯ ТЕСТА
-  // if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
-  //   return res.status(401).json({ error: 'Invalid signature' });
-  // }
+  if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
 
   const params = new URLSearchParams(initData);
   const userStr = params.get('user');
