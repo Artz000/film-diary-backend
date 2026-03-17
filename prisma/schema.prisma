@@ -33,8 +33,9 @@ model Review {
   userId     Int
   film       Film     @relation(fields: [filmId], references: [id])
   filmId     Int
-  status     String   // watched, want, favorite
+  status     String   // 'watched' или 'want'
   rating     Int?
   reviewText String?
   createdAt  DateTime @default(now())
+  isFavorite Boolean  @default(false) // новое поле
 }
