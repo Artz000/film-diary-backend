@@ -213,6 +213,7 @@ app.post('/api/films', async (req, res) => {
     }
 
     // Поиск или создание фильма с year и genres
+    // Поиск или создание фильма с year и genres
     let film = await prisma.film.findUnique({
       where: { tmdbId: Number(tmdbId) },
     });
@@ -223,7 +224,7 @@ app.post('/api/films', async (req, res) => {
           tmdbId: Number(tmdbId),
           title,
           posterPath,
-          year: year || null,
+          year: year ? String(year) : null,   // <-- преобразуем число в строку
           genres: genres || [],
         },
       });
