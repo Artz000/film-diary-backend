@@ -300,12 +300,10 @@ app.delete('/api/reviews/:id/like', async (req, res) => {
 app.get('/api/users/:userId/films', async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
-    const { status } = req.query; // status может быть 'watched', 'want', 'favorite' (для любимых)
+    const { status } = req.query;
 
-    let whereCondition: any = { userId };
-    if (status === 'favorite') {
-      whereCondition.isFavorite = true;
-    } else if (status) {
+    const whereCondition: any = { userId };
+    if (status && typeof status === 'string') {
       whereCondition.status = status;
     }
 
@@ -324,8 +322,8 @@ app.get('/api/users/:userId/films', async (req, res) => {
       status: review.status,
       rating: review.rating,
       reviewText: review.reviewText,
-      reviewId: review.id,            // добавляем идентификатор рецензии
-      isPublic: review.isPublic,      // добавляем флаг публичности
+      reviewId: review.id,
+      isPublic: review.isPublic,
       createdAt: review.createdAt,
     }));
 
@@ -373,7 +371,7 @@ app.patch('/api/films/:tmdbId', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
     const tmdbId = parseInt(req.params.tmdbId);
-    const { status, rating, reviewText } = req.body; // убрали isFavorite
+    const { status, rating, reviewText } = req.body; 
 
     if (!userId) return res.status(401).json({ error: 'User ID required' });
 
