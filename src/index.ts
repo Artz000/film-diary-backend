@@ -426,6 +426,36 @@ app.patch('/api/reviews/:id', async (req, res) => {
   }
 });
 
+// Изменение оценки рецензии
+app.patch('/api/reviews/:id/rating', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    const reviewId = parseInt(req.params.id);
+    const { rating } = req.body;
+
+    if (!userId) return res.status(401).json({ error: 'User ID required' });
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'Rating must be a number between 1 and 5' });
+    }
+
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review) return res.status(404).json({ error: 'Review not found' });
+    if (review.userId !== Number(userId)) return res.status(403).json({ error: 'Forbidden' });
+
+    const updated = await prisma.review.update({
+      where: { id: reviewId },
+      data: { rating },
+    });
+
+    res.json({ success: true, rating: updated.rating });
+  } catch (error) {
+    console.error('Error updating rating:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ------------------------------
 // Эндпоинты для работы с Кинопоиском
 // ------------------------------
@@ -433,18 +463,13 @@ app.patch('/api/reviews/:id', async (req, res) => {
 app.get('/api/feed', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
-    if (!userId) {
-      return res.status(401).json({ error: 'User ID required' });
-    }
+    if (!userId) return res.status(401).json({ error: 'User ID required' });
 
-    const userIdNum = Number(userId);
-    const { page = 1, limit = 20, sort = 'date' } = req.query;
+    const { sort = 'date', page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    // Определяем сортировку
     let orderBy: any = { createdAt: 'desc' };
     if (sort === 'popular') {
-      // Сортировка по количеству лайков (от большего к меньшему)
       orderBy = { likes: { _count: 'desc' } };
     }
 
@@ -454,23 +479,10 @@ app.get('/api/feed', async (req, res) => {
       skip,
       take: Number(limit),
       include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            photoUrl: true,
-          },
-        },
+        user: true,
         film: true,
-        _count: {
-          select: { likes: true },
-        },
-        likes: {
-          where: { userId: userIdNum },
-          select: { userId: true },
-        },
+        _count: { select: { likes: true } },
+        likes: { where: { userId: Number(userId) }, select: { userId: true } },
       },
     });
 
@@ -479,10 +491,10 @@ app.get('/api/feed', async (req, res) => {
     const feed = reviews.map(review => ({
       id: review.id,
       userName: review.user.firstName || review.user.username || 'Пользователь',
-      userPhoto: review.user.photoUrl,
       filmTitle: review.film.title,
       filmYear: review.film.year,
-      filmGenres: review.film.genres ? (review.film.genres as string[]) : [],
+      filmGenres: review.film.genres,
+      filmPoster: review.film.posterPath,
       rating: review.rating,
       reviewText: review.reviewText,
       createdAt: review.createdAt,
