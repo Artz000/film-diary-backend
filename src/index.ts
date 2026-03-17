@@ -186,15 +186,23 @@ app.post('/api/films', async (req, res) => {
     const userId = req.headers['user-id'];
     const { tmdbId, title, posterPath, year, genres, status, rating, reviewText } = req.body;
 
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-    if (!tmdbId || !title || !status) return res.status(400).json({ error: 'Missing required fields' });
+    // Проверка обязательных полей
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+    if (!tmdbId || !title || !status) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
 
     const userIdNum = Number(userId);
-    if (isNaN(userIdNum)) return res.status(400).json({ error: 'Invalid user ID' });
+    if (isNaN(userIdNum)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
 
-    // Проверка/создание пользователя
+    // Проверяем/создаём пользователя (на случай, если его нет в БД)
     let user = await prisma.user.findUnique({ where: { id: userIdNum } });
     if (!user) {
+      console.log(`User with id ${userIdNum} not found, creating...`);
       user = await prisma.user.create({
         data: {
           id: userIdNum,
@@ -206,59 +214,84 @@ app.post('/api/films', async (req, res) => {
       });
     }
 
-    // Поиск или создание фильма
+    // Ищем фильм по tmdbId
     let film = await prisma.film.findUnique({
       where: { tmdbId: Number(tmdbId) },
     });
 
     if (!film) {
+      // Создаём новый фильм, если не найден
       film = await prisma.film.create({
         data: {
           tmdbId: Number(tmdbId),
           title,
           posterPath,
           year: year ? String(year) : null,
-          genres: genres || [],
+          // Преобразуем массив жанров в JSON (Prisma сам сериализует, если поле типа Json)
+          genres: genres || null,
         },
       });
     }
 
-    // Проверка, есть ли уже рецензия этого пользователя на этот фильм
-    const existingReview = await prisma.review.findFirst({
-      where: {
+    // Создаём рецензию (запись в таблице Review)
+    const review = await prisma.review.create({
+      data: {
         userId: userIdNum,
         filmId: film.id,
+        status,
+        rating: status === 'watched' ? rating : null,
+        reviewText: reviewText || null,
+        isPublic: false, // по умолчанию рецензия не публикуется в ленте
       },
     });
 
-    if (existingReview) {
-      // Обновляем существующую
-      const updatedReview = await prisma.review.update({
-        where: { id: existingReview.id },
-        data: {
-          status,
-          rating: status === 'watched' ? rating : null,
-          reviewText: reviewText || null,
-          isFavorite: existingReview.isFavorite, // сохраняем предыдущее значение
-        },
-      });
-      return res.status(200).json({ success: true, reviewId: updatedReview.id });
-    } else {
-      // Создаём новую
-      const newReview = await prisma.review.create({
-        data: {
-          userId: userIdNum,
-          filmId: film.id,
-          status,
-          rating: status === 'watched' ? rating : null,
-          reviewText: reviewText || null,
-          isFavorite: false,
-        },
-      });
-      return res.status(201).json({ success: true, reviewId: newReview.id });
-    }
+    res.status(201).json({ success: true, reviewId: review.id });
   } catch (error) {
     console.error('Error adding film:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Поставить лайк
+app.post('/api/reviews/:id/like', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    const reviewId = parseInt(req.params.id);
+
+    if (!userId) return res.status(401).json({ error: 'User ID required' });
+
+    await prisma.like.create({
+      data: {
+        userId: Number(userId),
+        reviewId,
+      },
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error liking review:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Убрать лайк
+app.delete('/api/reviews/:id/like', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    const reviewId = parseInt(req.params.id);
+
+    if (!userId) return res.status(401).json({ error: 'User ID required' });
+
+    await prisma.like.delete({
+      where: {
+        userId_reviewId: {
+          userId: Number(userId),
+          reviewId,
+        },
+      },
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error unliking review:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -287,11 +320,12 @@ app.get('/api/users/:userId/films', async (req, res) => {
       title: review.film.title,
       poster: review.film.posterPath,
       year: review.film.year,
-      genres: review.film.genres,
+      genres: review.film.genres as string[] || [],
       status: review.status,
       rating: review.rating,
       reviewText: review.reviewText,
-      isFavorite: review.isFavorite,
+      reviewId: review.id,            // добавляем идентификатор рецензии
+      isPublic: review.isPublic,      // добавляем флаг публичности
       createdAt: review.createdAt,
     }));
 
@@ -339,7 +373,7 @@ app.patch('/api/films/:tmdbId', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
     const tmdbId = parseInt(req.params.tmdbId);
-    const { status, rating, reviewText, isFavorite } = req.body;
+    const { status, rating, reviewText } = req.body; // убрали isFavorite
 
     if (!userId) return res.status(401).json({ error: 'User ID required' });
 
@@ -347,21 +381,16 @@ app.patch('/api/films/:tmdbId', async (req, res) => {
     if (!film) return res.status(404).json({ error: 'Film not found' });
 
     const existingReview = await prisma.review.findFirst({
-      where: {
-        userId: Number(userId),
-        filmId: film.id,
-      },
+      where: { userId: Number(userId), filmId: film.id },
     });
-
     if (!existingReview) return res.status(404).json({ error: 'Review not found' });
 
     const updatedReview = await prisma.review.update({
       where: { id: existingReview.id },
       data: {
-        status: status || existingReview.status,
-        rating: rating !== undefined ? rating : existingReview.rating,
-        reviewText: reviewText !== undefined ? reviewText : existingReview.reviewText,
-        isFavorite: isFavorite !== undefined ? isFavorite : existingReview.isFavorite,
+        status: status ?? existingReview.status,
+        rating: rating ?? existingReview.rating,
+        reviewText: reviewText ?? existingReview.reviewText,
       },
     });
 
@@ -372,39 +401,103 @@ app.patch('/api/films/:tmdbId', async (req, res) => {
   }
 });
 
+app.patch('/api/reviews/:id', async (req, res) => {
+  try {
+    const userId = req.headers['user-id'];
+    const reviewId = parseInt(req.params.id);
+    const { isPublic } = req.body;
+
+    if (!userId) return res.status(401).json({ error: 'User ID required' });
+    if (typeof isPublic !== 'boolean') return res.status(400).json({ error: 'isPublic must be boolean' });
+
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review) return res.status(404).json({ error: 'Review not found' });
+    if (review.userId !== Number(userId)) return res.status(403).json({ error: 'Forbidden' });
+
+    const updated = await prisma.review.update({
+      where: { id: reviewId },
+      data: { isPublic },
+    });
+
+    res.json({ success: true, isPublic: updated.isPublic });
+  } catch (error) {
+    console.error('Error updating review visibility:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ------------------------------
 // Эндпоинты для работы с Кинопоиском
 // ------------------------------
 
-// Получение ленты (последние рецензии)
 app.get('/api/feed', async (req, res) => {
   try {
     const userId = req.headers['user-id'];
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
+    const userIdNum = Number(userId);
+    const { page = 1, limit = 20, sort = 'date' } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // Определяем сортировку
+    let orderBy: any = { createdAt: 'desc' };
+    if (sort === 'popular') {
+      // Сортировка по количеству лайков (от большего к меньшему)
+      orderBy = { likes: { _count: 'desc' } };
+    }
 
     const reviews = await prisma.review.findMany({
-      take: 50,
-      orderBy: { createdAt: 'desc' },
+      where: { isPublic: true },
+      orderBy,
+      skip,
+      take: Number(limit),
       include: {
-        user: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            photoUrl: true,
+          },
+        },
         film: true,
+        _count: {
+          select: { likes: true },
+        },
+        likes: {
+          where: { userId: userIdNum },
+          select: { userId: true },
+        },
       },
     });
+
+    const total = await prisma.review.count({ where: { isPublic: true } });
 
     const feed = reviews.map(review => ({
       id: review.id,
       userName: review.user.firstName || review.user.username || 'Пользователь',
+      userPhoto: review.user.photoUrl,
       filmTitle: review.film.title,
       filmYear: review.film.year,
-      filmGenres: review.film.genres,
-      status: review.status,
+      filmGenres: review.film.genres ? (review.film.genres as string[]) : [],
       rating: review.rating,
       reviewText: review.reviewText,
-      isFavorite: review.isFavorite,
       createdAt: review.createdAt,
+      likesCount: review._count.likes,
+      likedByMe: review.likes.length > 0,
     }));
 
-    res.json(feed);
+    res.json({
+      data: feed,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / Number(limit)),
+    });
   } catch (error) {
     console.error('Error fetching feed:', error);
     res.status(500).json({ error: 'Internal server error' });

@@ -15,6 +15,9 @@ model User {
   username  String?
   photoUrl  String?
   reviews   Review[]
+  followers Follow[] @relation("follows")
+  following Follow[] @relation("followedBy")
+  likes     Like[]   // добавлено
 }
 
 model Film {
@@ -22,8 +25,8 @@ model Film {
   tmdbId     Int      @unique
   title      String
   posterPath String?
-  year       String?   // добавлено
-  genres     String[]  // добавлено (массив строк)
+  year       String?
+  genres     Json?
   reviews    Review[]
 }
 
@@ -33,9 +36,29 @@ model Review {
   userId     Int
   film       Film     @relation(fields: [filmId], references: [id])
   filmId     Int
-  status     String   // 'watched' или 'want'
+  status     String
   rating     Int?
   reviewText String?
   createdAt  DateTime @default(now())
-  isFavorite Boolean  @default(false) // новое поле
+  isPublic   Boolean  @default(false)
+  likes      Like[]
+}
+
+model Follow {
+  id          Int   @id @default(autoincrement())
+  follower    User  @relation("follows", fields: [followerId], references: [id])
+  followerId  Int
+  following   User  @relation("followedBy", fields: [followingId], references: [id])
+  followingId Int
+
+  @@unique([followerId, followingId])
+}
+
+model Like {
+  user     User   @relation(fields: [userId], references: [id])
+  userId   Int
+  review   Review @relation(fields: [reviewId], references: [id])
+  reviewId Int
+
+  @@id([userId, reviewId])
 }
