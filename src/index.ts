@@ -208,16 +208,12 @@ app.post('/api/films', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
+// Получение фильмов текущего пользователя (по токену)
 app.get('/api/users/me/films', authMiddleware, async (req: AuthRequest, res) => {
-  const userId = req.userId!;
+  const userId = req.userId;
   const { status } = req.query;
-  try {
-    const userId = parseInt(req.params.userId);
-    if (req.userId !== userId) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const { status } = req.query;
 
+  try {
     const whereCondition: any = { userId };
     if (status && typeof status === 'string') {
       whereCondition.status = status;
@@ -229,7 +225,7 @@ app.get('/api/users/me/films', authMiddleware, async (req: AuthRequest, res) => 
       orderBy: { createdAt: 'desc' },
     });
 
-    const films = reviews.map(review => ({
+    const films = reviews.map((review) => ({
       id: review.film.tmdbId,
       reviewId: review.id,
       title: review.film.title,
@@ -245,8 +241,8 @@ app.get('/api/users/me/films', authMiddleware, async (req: AuthRequest, res) => 
     }));
 
     res.json(films);
-  } catch (err) {
-    console.error('Error fetching user films:', err);
+  } catch (error) {
+    console.error('Error fetching user films:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
