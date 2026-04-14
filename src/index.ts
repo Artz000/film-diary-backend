@@ -6,6 +6,7 @@ import axios from 'axios';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { authMiddleware, AuthRequest } from './middleware/auth';
+import recommendationsRouter from './recommendations';
 
 dotenv.config();
 
@@ -443,6 +444,7 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
 
 // Fallback для любых других запросов
 app.use('*', (req, res) => res.status(200).send('OK'));
+app.use(recommendationsRouter);
 
 // Запуск сервера
 const server = app.listen(PORT, '0.0.0.0', () => {

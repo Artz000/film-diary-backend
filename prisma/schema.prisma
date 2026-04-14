@@ -8,14 +8,16 @@ datasource db {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
   passwordHash String
-  name         String?
-  reviews      Review[]
-  followers    Follow[] @relation("follows")
-  following    Follow[] @relation("followedBy")
-  likes        Like[]
+  name      String?
+  reviews   Review[]
+  followers Follow[] @relation("follows")
+  following Follow[] @relation("followedBy")
+  likes     Like[]
+  recommendationCache   RecommendationCache[]   // добавлено
+  recommendationFeedback RecommendationFeedback[] // добавлено
 }
 
 model Film {
@@ -26,6 +28,8 @@ model Film {
   year       String?
   genres     Json?
   reviews    Review[]
+  recommendationCache   RecommendationCache[]   // добавлено
+  recommendationFeedback RecommendationFeedback[] // добавлено
 }
 
 model Review {
@@ -60,4 +64,31 @@ model Like {
   reviewId Int
 
   @@id([userId, reviewId])
+}
+
+model RecommendationCache {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  filmId    Int
+  score     Float
+  reasons   Json      // массив строк
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id])
+  film      Film     @relation(fields: [filmId], references: [id])
+
+  @@unique([userId, filmId])
+  @@index([userId])
+}
+
+model RecommendationFeedback {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  filmId    Int
+  feedback  String   // 'like', 'dislike', 'watched'
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  film      Film     @relation(fields: [filmId], references: [id])
+
+  @@unique([userId, filmId])
+  @@index([userId])
 }
