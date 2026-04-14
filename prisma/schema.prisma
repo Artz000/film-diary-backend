@@ -8,16 +8,14 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  tgId      String   @unique
-  firstName String?
-  lastName  String?
-  username  String?
-  photoUrl  String?
-  reviews   Review[]
-  followers Follow[] @relation("follows")
-  following Follow[] @relation("followedBy")
-  likes     Like[]   // добавлено
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  reviews      Review[]
+  followers    Follow[] @relation("follows")
+  following    Follow[] @relation("followedBy")
+  likes        Like[]
 }
 
 model Film {
@@ -36,7 +34,7 @@ model Review {
   userId     Int
   film       Film     @relation(fields: [filmId], references: [id])
   filmId     Int
-  status     String   // watched, want, favorite (статус может остаться, но теперь у нас отдельный isFavorite)
+  status     String
   rating     Int?
   reviewText String?
   createdAt  DateTime @default(now())

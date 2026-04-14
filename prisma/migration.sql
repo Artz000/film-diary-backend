@@ -1,2 +1,0 @@
-ALTER TABLE "Film" ADD COLUMN "year" TEXT;
-ALTER TABLE "Film" ADD COLUMN "genres" TEXT[];

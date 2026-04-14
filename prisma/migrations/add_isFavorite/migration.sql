@@ -1,0 +1,1 @@
+ALTER TABLE "Review" ADD COLUMN "isFavorite" BOOLEAN NOT NULL DEFAULT false;

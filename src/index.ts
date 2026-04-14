@@ -3,501 +3,116 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
-import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { authMiddleware, AuthRequest } from './middleware/auth';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const KINOPOISK_API_KEY = process.env.KINOPOISK_API_KEY;
 const KINOPOISK_API_URL = 'https://api.kinopoisk.dev/v1.4';
 
 export const prisma = new PrismaClient();
 
-// Глобальные обработчики непойманных ошибок
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// Middleware для детального логирования запросов
-app.use((req, res, next) => {
-  const requestId = Math.random().toString(36).substring(7);
-  console.log(`[${requestId}] ➡️ ${req.method} ${req.path} at ${new Date().toISOString()}`);
-  const start = Date.now();
-
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    console.log(`[${requestId}] ⬅️ ${req.method} ${req.path} ${res.statusCode} - ${duration}ms`);
-  });
-
-  res.on('error', (err) => {
-    console.error(`[${requestId}] ❌ Error on ${req.method} ${req.path}:`, err);
-  });
-
-  next();
-});
-
-// Настройка CORS — разрешаем все нужные домены
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://localhost:5173',
-  'https://film-diary-frontend1.vercel.app',
-  'https://film-diary-frontend1-lhdnkml0c-artz000s-projects.vercel.app' // твой текущий фронт
-];
-
+// Middleware
 app.use(cors({
-  origin: (origin, callback) => {
-    // разрешаем запросы без origin (например, с мобильных приложений)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`Blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: ['http://localhost:5173', 'https://film-diary-frontend1.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'user-id']
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-
-// Явно обрабатываем OPTIONS-запросы (preflight)
 app.options('*', cors());
-
 app.use(express.json());
 
-// ------------------------------
-// Health check endpoints (для платформы)
-// ------------------------------
-app.get('/', (req, res) => {
-  res.send('FilmDiary backend is running');
-});
+// Health check
+app.get('/', (req, res) => res.send('FilmDiary backend is running'));
+app.get('/health', (req, res) => res.status(200).send('OK'));
 
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
-
-// ------------------------------
-// Вспомогательная функция валидации initData
-// ------------------------------
-function validateTelegramWebAppData(initData: string, botToken: string): boolean {
+// ---------------------------
+// Аутентификация
+// ---------------------------
+app.post('/api/auth/register', async (req, res) => {
   try {
-    const params = new URLSearchParams(initData);
-    const hash = params.get('hash');
-    params.delete('hash');
+    const { email, password, name } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
 
-    const dataCheckString = Array.from(params.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => `${key}=${value}`)
-      .join('\n');
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
 
-    const secretKey = crypto
-      .createHmac('sha256', 'WebAppData')
-      .update(botToken)
-      .digest();
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        name: name || email.split('@')[0],
+      },
+    });
 
-    const calculatedHash = crypto
-      .createHmac('sha256', secretKey)
-      .update(dataCheckString)
-      .digest('hex');
-
-    return calculatedHash === hash;
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({
+      token,
+      user: { id: user.id, email: user.email, name: user.name },
+    });
   } catch (err) {
-    console.error('Validation error:', err);
-    return false;
+    console.error('Registration error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-}
+});
 
-// ------------------------------
-// Авторизация через Telegram
-// ------------------------------
-app.post('/api/auth', async (req, res) => {
-  const { initData } = req.body;
-
-  if (typeof initData !== 'string' || initData.trim() === '') {
-    return res.status(400).json({ error: 'initData required' });
-  }
-
-  if (!BOT_TOKEN) {
-    console.error('BOT_TOKEN is not defined');
-    return res.status(500).json({ error: 'Server configuration error' });
-  }
-
-  // ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ ПОДПИСИ ДЛЯ ТЕСТА
-  if (!validateTelegramWebAppData(initData, BOT_TOKEN)) {
-    return res.status(401).json({ error: 'Invalid signature' });
-  }
-
-  const params = new URLSearchParams(initData);
-  const userStr = params.get('user');
-  if (!userStr) {
-    return res.status(400).json({ error: 'No user data in initData' });
-  }
-
-  let tgUser;
+app.post('/api/auth/login', async (req, res) => {
   try {
-    tgUser = JSON.parse(userStr);
-  } catch (e) {
-    return res.status(400).json({ error: 'Invalid user data format' });
-  }
-
-  try {
-    let user = await prisma.user.findUnique({
-      where: { tgId: String(tgUser.id) },
-    });
-
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          tgId: String(tgUser.id),
-          firstName: tgUser.first_name || '',
-          lastName: tgUser.last_name || '',
-          username: tgUser.username || '',
-          photoUrl: tgUser.photo_url || '',
-        },
-      });
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
-      user: {
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-      },
+      token,
+      user: { id: user.id, email: user.email, name: user.name },
     });
-  } catch (dbError) {
-    console.error('Database error during auth:', dbError);
+  } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ------------------------------
-// Эндпоинты для работы с фильмами пользователя
-// ------------------------------
-
-// Добавление фильма в коллекцию
-app.post('/api/films', async (req, res) => {
+app.get('/api/auth/me', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const userId = req.headers['user-id'];
-    const { tmdbId, title, posterPath, year, genres, status, rating, reviewText,isFavorite = false  } = req.body;
-
-    // Проверка обязательных полей
-    if (!userId) {
-      return res.status(401).json({ error: 'User ID required' });
-    }
-    if (!tmdbId || !title || !status) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const userIdNum = Number(userId);
-    if (isNaN(userIdNum)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
-    }
-
-    // Проверяем/создаём пользователя (на случай, если его нет в БД)
-    let user = await prisma.user.findUnique({ where: { id: userIdNum } });
-    if (!user) {
-      console.log(`User with id ${userIdNum} not found, creating...`);
-      user = await prisma.user.create({
-        data: {
-          id: userIdNum,
-          tgId: String(userIdNum),
-          firstName: 'Тестовый',
-          lastName: 'Пользователь',
-          username: `user_${userIdNum}`,
-        },
-      });
-    }
-
-    // Ищем фильм по tmdbId
-    let film = await prisma.film.findUnique({
-      where: { tmdbId: Number(tmdbId) },
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { id: true, email: true, name: true },
     });
-
-    if (!film) {
-      // Создаём новый фильм, если не найден
-      film = await prisma.film.create({
-        data: {
-          tmdbId: Number(tmdbId),
-          title,
-          posterPath,
-          year: year ? String(year) : null,
-          // Преобразуем массив жанров в JSON (Prisma сам сериализует, если поле типа Json)
-          genres: genres || null,
-        },
-      });
-    }
-
-    // Создаём рецензию (запись в таблице Review)
-    const review = await prisma.review.create({
-      data: {
-        userId: userIdNum,
-        filmId: film.id,
-        status,
-        rating: status === 'watched' ? rating : null,
-        reviewText: reviewText || null,
-        isPublic: false, // по умолчанию рецензия не публикуется в ленте
-        isFavorite, // добавлено
-      },
-    });
-
-
-    res.status(201).json({ success: true, reviewId: review.id });
-  } catch (error) {
-    console.error('Error adding film:', error);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Поставить лайк
-app.post('/api/reviews/:id/like', async (req, res) => {
+// ---------------------------
+// Лента (публичные рецензии)
+// ---------------------------
+app.get('/api/feed', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const userId = req.headers['user-id'];
-    const reviewId = parseInt(req.params.id);
-
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-
-    await prisma.like.create({
-      data: {
-        userId: Number(userId),
-        reviewId,
-      },
-    });
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error liking review:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Убрать лайк
-app.delete('/api/reviews/:id/like', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    const reviewId = parseInt(req.params.id);
-
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-
-    await prisma.like.delete({
-      where: {
-        userId_reviewId: {
-          userId: Number(userId),
-          reviewId,
-        },
-      },
-    });
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error unliking review:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Получение фильмов пользователя (с фильтром по статусу)
-app.get('/api/users/:userId/films', async (req, res) => {
-  try {
-    const userId = parseInt(req.params.userId);
-    const { status, favorite } = req.query;
-
-    let whereCondition: any = { userId };
-    if (favorite === 'true') {
-      whereCondition.isFavorite = true;
-    } else if (status && typeof status === 'string') {
-      whereCondition.status = status;
-    }
-
-    const reviews = await prisma.review.findMany({
-      where: whereCondition,
-      include: { film: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const films = reviews.map((review) => ({
-      id: review.film.tmdbId,
-      reviewId: review.id,
-      title: review.film.title,
-      poster: review.film.posterPath,
-      year: review.film.year,
-      genres: review.film.genres,
-      status: review.status,
-      rating: review.rating,
-      reviewText: review.reviewText,
-      isPublic: review.isPublic,
-      isFavorite: review.isFavorite,
-      createdAt: review.createdAt,
-    }));
-
-    res.json(films);
-  } catch (error) {
-    console.error('Error fetching user films:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Удаление фильма из коллекции
-app.delete('/api/films/:tmdbId', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    const tmdbId = parseInt(req.params.tmdbId);
-
-    if (!userId) {
-      return res.status(401).json({ error: 'User ID required' });
-    }
-
-    const film = await prisma.film.findUnique({
-      where: { tmdbId },
-    });
-
-    if (!film) {
-      return res.status(404).json({ error: 'Film not found' });
-    }
-
-    await prisma.review.deleteMany({
-      where: {
-        userId: Number(userId),
-        filmId: film.id,
-      },
-    });
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting film:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Обновление статуса фильма (например, из "хочу посмотреть" в "просмотрено")
-app.patch('/api/films/:tmdbId', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    const tmdbId = parseInt(req.params.tmdbId);
-    const { status, rating, reviewText } = req.body; 
-
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-
-    const film = await prisma.film.findUnique({ where: { tmdbId } });
-    if (!film) return res.status(404).json({ error: 'Film not found' });
-
-    const existingReview = await prisma.review.findFirst({
-      where: { userId: Number(userId), filmId: film.id },
-    });
-    if (!existingReview) return res.status(404).json({ error: 'Review not found' });
-
-    const updatedReview = await prisma.review.update({
-      where: { id: existingReview.id },
-      data: {
-        status: status ?? existingReview.status,
-        rating: rating ?? existingReview.rating,
-        reviewText: reviewText ?? existingReview.reviewText,
-      },
-    });
-
-    res.json({ success: true, reviewId: updatedReview.id });
-  } catch (error) {
-    console.error('Error updating film:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.patch('/api/reviews/:id', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    const reviewId = parseInt(req.params.id);
-    const { isPublic } = req.body;
-
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-    if (typeof isPublic !== 'boolean') return res.status(400).json({ error: 'isPublic must be boolean' });
-
-    const review = await prisma.review.findUnique({
-      where: { id: reviewId },
-    });
-    if (!review) return res.status(404).json({ error: 'Review not found' });
-    if (review.userId !== Number(userId)) return res.status(403).json({ error: 'Forbidden' });
-
-    const updated = await prisma.review.update({
-      where: { id: reviewId },
-      data: { isPublic },
-    });
-
-    res.json({ success: true, isPublic: updated.isPublic });
-  } catch (error) {
-    console.error('Error updating review visibility:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Изменение оценки рецензии
-app.patch('/api/reviews/:id/rating', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    const reviewId = parseInt(req.params.id);
-    const { rating } = req.body;
-
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
-      return res.status(400).json({ error: 'Rating must be a number between 1 and 5' });
-    }
-
-    const review = await prisma.review.findUnique({
-      where: { id: reviewId },
-    });
-    if (!review) return res.status(404).json({ error: 'Review not found' });
-    if (review.userId !== Number(userId)) return res.status(403).json({ error: 'Forbidden' });
-
-    const updated = await prisma.review.update({
-      where: { id: reviewId },
-      data: { rating },
-    });
-
-    res.json({ success: true, rating: updated.rating });
-  } catch (error) {
-    console.error('Error updating rating:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Переключение избранного
-app.patch('/api/reviews/:id/favorite', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    const reviewId = parseInt(req.params.id);
-    const { isFavorite } = req.body;
-
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-    if (typeof isFavorite !== 'boolean') return res.status(400).json({ error: 'isFavorite must be boolean' });
-
-    const review = await prisma.review.findUnique({
-      where: { id: reviewId },
-    });
-    if (!review) return res.status(404).json({ error: 'Review not found' });
-    if (review.userId !== Number(userId)) return res.status(403).json({ error: 'Forbidden' });
-
-    const updated = await prisma.review.update({
-      where: { id: reviewId },
-      data: { isFavorite },
-    });
-
-    res.json({ success: true, isFavorite: updated.isFavorite });
-  } catch (error) {
-    console.error('Error updating favorite:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ------------------------------
-// Эндпоинты для работы с Кинопоиском
-// ------------------------------
-
-app.get('/api/feed', async (req, res) => {
-  try {
-    const userId = req.headers['user-id'];
-    if (!userId) return res.status(401).json({ error: 'User ID required' });
-
     const { sort = 'date', page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -512,10 +127,10 @@ app.get('/api/feed', async (req, res) => {
       skip,
       take: Number(limit),
       include: {
-        user: true,
+        user: { select: { id: true, name: true, email: true } },
         film: true,
         _count: { select: { likes: true } },
-        likes: { where: { userId: Number(userId) }, select: { userId: true } },
+        likes: { where: { userId: req.userId }, select: { userId: true } },
       },
     });
 
@@ -523,7 +138,7 @@ app.get('/api/feed', async (req, res) => {
 
     const feed = reviews.map(review => ({
       id: review.id,
-      userName: review.user.firstName || review.user.username || 'Пользователь',
+      userName: review.user.name || review.user.email.split('@')[0],
       filmTitle: review.film.title,
       filmYear: review.film.year,
       filmGenres: review.film.genres,
@@ -541,35 +156,229 @@ app.get('/api/feed', async (req, res) => {
       page: Number(page),
       totalPages: Math.ceil(total / Number(limit)),
     });
-  } catch (error) {
-    console.error('Error fetching feed:', error);
+  } catch (err) {
+    console.error('Feed error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Поиск фильмов
+// ---------------------------
+// Работа с фильмами пользователя
+// ---------------------------
+app.post('/api/films', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const { tmdbId, title, posterPath, year, genres, status, rating, reviewText, isPublic = false } = req.body;
+
+    if (!tmdbId || !title || !status) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Найти или создать фильм
+    let film = await prisma.film.findUnique({ where: { tmdbId: Number(tmdbId) } });
+    if (!film) {
+      film = await prisma.film.create({
+        data: {
+          tmdbId: Number(tmdbId),
+          title,
+          posterPath,
+          year: year ? String(year) : null,
+          genres: genres || [],
+        },
+      });
+    }
+
+    // Создать рецензию
+    const review = await prisma.review.create({
+      data: {
+        userId,
+        filmId: film.id,
+        status,
+        rating: status === 'watched' ? rating : null,
+        reviewText: reviewText || null,
+        isPublic,
+        isFavorite: status === 'favorite',
+      },
+    });
+
+    res.status(201).json({ success: true, reviewId: review.id });
+  } catch (err) {
+    console.error('Error adding film:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/users/me/films', authMiddleware, async (req: AuthRequest, res) => {
+  const userId = req.userId!;
+  const { status } = req.query;
+  try {
+    const userId = parseInt(req.params.userId);
+    if (req.userId !== userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { status } = req.query;
+
+    const whereCondition: any = { userId };
+    if (status && typeof status === 'string') {
+      whereCondition.status = status;
+    }
+
+    const reviews = await prisma.review.findMany({
+      where: whereCondition,
+      include: { film: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const films = reviews.map(review => ({
+      id: review.film.tmdbId,
+      reviewId: review.id,
+      title: review.film.title,
+      poster: review.film.posterPath,
+      year: review.film.year,
+      genres: review.film.genres,
+      status: review.status,
+      rating: review.rating,
+      reviewText: review.reviewText,
+      isPublic: review.isPublic,
+      isFavorite: review.isFavorite,
+      createdAt: review.createdAt,
+    }));
+
+    res.json(films);
+  } catch (err) {
+    console.error('Error fetching user films:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/api/films/:tmdbId', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const tmdbId = parseInt(req.params.tmdbId);
+    const { status, rating, reviewText } = req.body;
+
+    const film = await prisma.film.findUnique({ where: { tmdbId } });
+    if (!film) return res.status(404).json({ error: 'Film not found' });
+
+    const updated = await prisma.review.updateMany({
+      where: { userId, filmId: film.id },
+      data: {
+        status,
+        rating: status === 'watched' ? rating : null,
+        reviewText: reviewText || undefined,
+      },
+    });
+
+    if (updated.count === 0) return res.status(404).json({ error: 'Review not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating film status:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/films/:tmdbId', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const tmdbId = parseInt(req.params.tmdbId);
+
+    const film = await prisma.film.findUnique({ where: { tmdbId } });
+    if (!film) return res.status(404).json({ error: 'Film not found' });
+
+    await prisma.review.deleteMany({ where: { userId, filmId: film.id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting film:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------------------------
+// Рецензии (лайки, публикация, рейтинг)
+// ---------------------------
+app.patch('/api/reviews/:id', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const reviewId = parseInt(req.params.id);
+    const { isPublic } = req.body;
+
+    const review = await prisma.review.findUnique({ where: { id: reviewId } });
+    if (!review) return res.status(404).json({ error: 'Review not found' });
+    if (review.userId !== userId) return res.status(403).json({ error: 'Forbidden' });
+
+    const updated = await prisma.review.update({
+      where: { id: reviewId },
+      data: { isPublic },
+    });
+    res.json({ success: true, isPublic: updated.isPublic });
+  } catch (err) {
+    console.error('Error updating review visibility:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/api/reviews/:id/rating', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const reviewId = parseInt(req.params.id);
+    const { rating } = req.body;
+
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'Rating must be 1-5' });
+    }
+
+    const review = await prisma.review.findUnique({ where: { id: reviewId } });
+    if (!review) return res.status(404).json({ error: 'Review not found' });
+    if (review.userId !== userId) return res.status(403).json({ error: 'Forbidden' });
+
+    const updated = await prisma.review.update({ where: { id: reviewId }, data: { rating } });
+    res.json({ success: true, rating: updated.rating });
+  } catch (err) {
+    console.error('Error updating rating:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/reviews/:id/like', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const reviewId = parseInt(req.params.id);
+    await prisma.like.create({ data: { userId, reviewId } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error liking review:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/reviews/:id/like', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const reviewId = parseInt(req.params.id);
+    await prisma.like.delete({ where: { userId_reviewId: { userId, reviewId } } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error unliking review:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------------------------
+// API Кинопоиска
+// ---------------------------
 app.get('/api/kinopoisk/search', async (req, res) => {
   try {
     const { query, limit = 10, page = 1 } = req.query;
-
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ error: 'Query parameter is required' });
     }
     if (!KINOPOISK_API_KEY) {
-      console.error('KINOPOISK_API_KEY is not defined');
       return res.status(500).json({ error: 'Server configuration error' });
     }
 
     const response = await axios.get(`${KINOPOISK_API_URL}/movie/search`, {
-      headers: {
-        'X-API-KEY': KINOPOISK_API_KEY,
-        'Accept': 'application/json',
-      },
-      params: {
-        query: query,
-        limit: limit,
-        page: page,
-      },
+      headers: { 'X-API-KEY': KINOPOISK_API_KEY, Accept: 'application/json' },
+      params: { query, limit, page },
     });
 
     const films = response.data.docs.map((movie: any) => ({
@@ -582,39 +391,21 @@ app.get('/api/kinopoisk/search', async (req, res) => {
       genres: movie.genres?.map((g: any) => g.name),
     }));
 
-    res.json({
-      films,
-      total: response.data.total,
-      page: response.data.page,
-      pages: response.data.pages,
-    });
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      console.error('Kinopoisk API error:', error.response?.data || error.message);
-    } else {
-      console.error('Kinopoisk API error:', error);
-    }
+    res.json({ films, total: response.data.total, page: response.data.page, pages: response.data.pages });
+  } catch (err) {
+    console.error('Kinopoisk error:', err);
     res.status(500).json({ error: 'Failed to fetch from Kinopoisk' });
   }
 });
 
-// Получение деталей фильма по ID
 app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!KINOPOISK_API_KEY) {
-      console.error('KINOPOISK_API_KEY is not defined');
-      return res.status(500).json({ error: 'Server configuration error' });
-    }
+    if (!KINOPOISK_API_KEY) return res.status(500).json({ error: 'API key missing' });
 
     const response = await axios.get(`${KINOPOISK_API_URL}/movie/${id}`, {
-      headers: {
-        'X-API-KEY': KINOPOISK_API_KEY,
-        'Accept': 'application/json',
-      },
+      headers: { 'X-API-KEY': KINOPOISK_API_KEY, Accept: 'application/json' },
     });
-
     const movie = response.data;
     res.json({
       id: movie.id,
@@ -628,59 +419,25 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
       duration: movie.movieLength,
       ageRating: movie.ageRating,
     });
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      console.error('Kinopoisk API error:', error.response?.data || error.message);
-    } else {
-      console.error('Kinopoisk API error:', error);
-    }
+  } catch (err) {
+    console.error('Kinopoisk error:', err);
     res.status(500).json({ error: 'Failed to fetch movie details' });
   }
 });
 
-// ------------------------------
-// Проверка подключения к БД
-// ------------------------------
-async function connectDB() {
-  try {
-    await prisma.$connect();
-    console.log('✅ База данных подключена');
-  } catch (error) {
-    console.error('❌ Ошибка подключения к БД:', error);
-  }
-}
-connectDB();
+// Fallback для любых других запросов
+app.use('*', (req, res) => res.status(200).send('OK'));
 
-// ------------------------------
-// Fallback для любого запроса, чтобы health check всегда отвечал 200
-// ------------------------------
-app.use('*', (req, res) => {
-  console.log(`[fallback] ${req.method} ${req.path} - returning 200 OK`);
-  res.status(200).send('OK');
-});
-
-// ------------------------------
-// Запуск сервера с graceful shutdown
-// ------------------------------
+// Запуск сервера
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
 
-// Обработка сигналов завершения
-const gracefulShutdown = () => {
-  console.log('⏳ Получен сигнал завершения, закрываем сервер...');
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, closing server...');
   server.close(async () => {
-    console.log('🛑 Сервер остановлен');
     await prisma.$disconnect();
-    console.log('🔌 Отключение от БД');
     process.exit(0);
   });
-
-  setTimeout(() => {
-    console.error('❌ Таймаут при завершении, принудительный выход');
-    process.exit(1);
-  }, 10000);
-};
-
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+});
