@@ -211,14 +211,13 @@ app.post('/api/films', authMiddleware, async (req: AuthRequest, res) => {
 // Получение фильмов текущего пользователя (по токену)
 app.get('/api/users/me/films', authMiddleware, async (req: AuthRequest, res) => {
   const userId = req.userId;
-  const { status } = req.query;
+  const { status, favorite } = req.query;
+
+  const whereCondition: any = { userId };
+  if (status && typeof status === 'string') whereCondition.status = status;
+  if (favorite === 'true') whereCondition.isFavorite = true;
 
   try {
-    const whereCondition: any = { userId };
-    if (status && typeof status === 'string') {
-      whereCondition.status = status;
-    }
-
     const reviews = await prisma.review.findMany({
       where: whereCondition,
       include: { film: true },
@@ -355,6 +354,27 @@ app.delete('/api/reviews/:id/like', authMiddleware, async (req: AuthRequest, res
     res.json({ success: true });
   } catch (err) {
     console.error('Error unliking review:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/api/films/:id/favorite', authMiddleware, async (req: AuthRequest, res) => {
+  const userId = req.userId;
+  const filmId = parseInt(req.params.id);
+  const { isFavorite } = req.body; // true/false
+
+  try {
+    const film = await prisma.film.findUnique({ where: { tmdbId: filmId } });
+    if (!film) return res.status(404).json({ error: 'Film not found' });
+
+    const review = await prisma.review.updateMany({
+      where: { userId, filmId: film.id },
+      data: { isFavorite },
+    });
+    if (review.count === 0) return res.status(404).json({ error: 'Review not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
