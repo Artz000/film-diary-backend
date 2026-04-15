@@ -22,21 +22,16 @@ export async function getHybridRecommendations(
   config: HybridConfig = DEFAULT_CONFIG,
   limit: number = 20
 ): Promise<RecommendationScore[]> {
-  
   console.log(`[Hybrid] Starting for user ${userId}`);
-  
-  // Проверяем кэш
+
+  // Кэш
   const cached = await prisma.recommendationCache.findMany({
-    where: {
-      userId,
-      expiresAt: { gt: new Date() }
-    },
+    where: { userId, expiresAt: { gt: new Date() } },
     orderBy: { score: 'desc' },
     take: limit
   });
-
   if (cached.length >= limit) {
-    console.log(`[Hybrid] Using cached recommendations for user ${userId}`);
+    console.log(`[Hybrid] Using cached recommendations (${cached.length})`);
     return cached.map(c => ({
       filmId: c.filmId,
       score: c.score,
@@ -44,95 +39,58 @@ export async function getHybridRecommendations(
     }));
   }
 
-  console.log(`[Hybrid] Generating fresh recommendations for user ${userId}`);
-
-  // Получаем контентные и коллаборативные оценки
+  console.log(`[Hybrid] Generating fresh recommendations`);
   const [contentScores, collabScores] = await Promise.all([
     getContentBasedScores(userId),
     getCollaborativeScores(userId)
   ]);
-  
-  console.log(`[Hybrid] Content scores size: ${contentScores.size}, Collab scores size: ${collabScores.size}`);
+  console.log(`[Hybrid] Content scores: ${contentScores.size}, Collab: ${collabScores.size}`);
 
-  // Получаем популярные фильмы (для бонуса)
+  // Популярные фильмы (для бонуса)
   const popularFilms = await prisma.film.findMany({
-    where: {
-      NOT: {
-        reviews: { none: {} }
-      }
-    },
-    include: {
-      _count: {
-        select: { reviews: true }
-      }
-    },
-    orderBy: {
-      reviews: { _count: 'desc' }
-    },
+    where: { NOT: { reviews: { none: {} } } },
+    include: { _count: { select: { reviews: true } } },
+    orderBy: { reviews: { _count: 'desc' } },
     take: 50
   });
-
   const popularityMap = new Map<number, number>();
   const maxReviews = Math.max(...popularFilms.map(f => f._count.reviews), 1);
   for (const film of popularFilms) {
     popularityMap.set(film.id, film._count.reviews / maxReviews);
   }
 
-  // Объединяем все возможные filmId
-  const allFilmIds = new Set([
-    ...contentScores.keys(),
-    ...collabScores.keys()
-  ]);
-  
-  console.log(`[Hybrid] Total unique films: ${allFilmIds.size}`);
-
+  const allFilmIds = new Set([...contentScores.keys(), ...collabScores.keys()]);
   const finalScores: RecommendationScore[] = [];
 
   for (const filmId of allFilmIds) {
     let totalScore = 0;
     const reasons: string[] = [];
 
-    const contentScore = contentScores.get(filmId);
-    if (contentScore) {
-      totalScore += contentScore.score * config.contentWeight;
-      reasons.push(...contentScore.reasons);
+    const content = contentScores.get(filmId);
+    if (content) {
+      totalScore += content.score * config.contentWeight;
+      reasons.push(...content.reasons);
     }
-
-    const collabScore = collabScores.get(filmId);
-    if (collabScore) {
-      totalScore += collabScore.score * config.collabWeight;
-      reasons.push(...collabScore.reasons);
+    const collab = collabScores.get(filmId);
+    if (collab) {
+      totalScore += collab.score * config.collabWeight;
+      reasons.push(...collab.reasons);
     }
-
-    const popularityBonus = (popularityMap.get(filmId) || 0) * config.popularityBoost;
-    totalScore += popularityBonus;
-    
-    if (popularityBonus > 0 && !reasons.includes('Популярный фильм')) {
-      reasons.push('Популярный фильм');
-    }
+    const popularity = (popularityMap.get(filmId) || 0) * config.popularityBoost;
+    totalScore += popularity;
+    if (popularity > 0 && !reasons.includes('Популярный фильм')) reasons.push('Популярный фильм');
 
     if (totalScore >= config.minScore) {
-      finalScores.push({
-        filmId,
-        score: totalScore,
-        reasons: [...new Set(reasons)]
-      });
+      finalScores.push({ filmId, score: totalScore, reasons: [...new Set(reasons)] });
     }
   }
 
-  console.log(`[Hybrid] Final scores before filtering: ${finalScores.length}`);
-  
   const sorted = finalScores.sort((a, b) => b.score - a.score).slice(0, limit);
-  
   const filtered = await filterWatchedFilms(userId, sorted);
-  
-  console.log(`[Hybrid] After filtering watched: ${filtered.length}`);
+  console.log(`[Hybrid] Final recommendations: ${filtered.length}`);
 
-  // Сохраняем в кэш
   if (filtered.length > 0) {
-    await prisma.recommendationCache.deleteMany({
-      where: { userId }
-    });
+    await prisma.recommendationCache.deleteMany({ where: { userId } });
     await prisma.recommendationCache.createMany({
       data: filtered.map(rec => ({
         userId,
@@ -143,6 +101,5 @@ export async function getHybridRecommendations(
       }))
     });
   }
-
   return filtered;
 }

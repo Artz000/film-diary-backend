@@ -30,7 +30,6 @@ export async function getUserProfile(userId: number): Promise<UserProfile> {
 
   reviews.forEach(review => {
     totalRating += review.rating || 0;
-    
     if ((review.rating || 0) >= 4) {
       highRatedFilms.push(review.filmId);
     }
@@ -64,9 +63,7 @@ export async function filterWatchedFilms(
     where: { userId },
     select: { filmId: true }
   });
-  
   const watchedFilmIds = new Set(watched.map(w => w.filmId));
-  
   return recommendations.filter(rec => !watchedFilmIds.has(rec.filmId));
 }
 
@@ -78,16 +75,13 @@ export async function getPopularRecommendations(userId: number, limit: number) {
       }
     },
     include: {
-      _count: {
-        select: { reviews: true }
-      }
+      _count: { select: { reviews: true } }
     },
     orderBy: {
       reviews: { _count: 'desc' }
     },
     take: limit
   });
-
   return popularFilms.map(film => ({
     filmId: film.id,
     score: 0.5,
