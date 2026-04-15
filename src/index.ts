@@ -442,6 +442,88 @@ app.get('/api/kinopoisk/movie/:id', async (req, res) => {
   }
 });
 
+// Статистика пользователя
+app.get('/api/users/me/stats', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+
+    // Получаем все рецензии пользователя
+    const reviews = await prisma.review.findMany({
+      where: { userId },
+      include: { film: true },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    // Подсчёт по статусам
+    const totalWatched = reviews.filter(r => r.status === 'watched').length;
+    const totalWant = reviews.filter(r => r.status === 'want').length;
+    const totalFavorite = reviews.filter(r => r.status === 'favorite' || r.isFavorite).length;
+
+    // Средний рейтинг просмотренных
+    const watchedRatings = reviews.filter(r => r.status === 'watched' && r.rating !== null).map(r => r.rating!);
+    const avgRating = watchedRatings.length ? watchedRatings.reduce((a,b) => a+b,0) / watchedRatings.length : 0;
+
+    // Статистика по месяцам (последние 6 месяцев)
+    const now = new Date();
+    const months: { year: number; month: number; count: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push({
+            year: d.getFullYear(),
+            month: d.getMonth(),
+            count: 0
+        });
+    }
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        count: 0
+      });
+    }
+    // Заполняем просмотры по месяцам
+    reviews.forEach(r => {
+      if (r.status === 'watched' && r.createdAt) {
+        const date = new Date(r.createdAt);
+        const monthIdx = months.findIndex(m => m.year === date.getFullYear() && m.month === date.getMonth());
+        if (monthIdx !== -1) months[monthIdx].count++;
+      }
+    });
+    const timeline = months.map(m => ({
+      label: `${m.month+1}.${m.year}`,
+      count: m.count
+    }));
+
+    // Топ-5 жанров
+    const genreCount = new Map<string, number>();
+    reviews.forEach(r => {
+      if (r.status === 'watched' && r.film.genres) {
+        const genres = r.film.genres as string[];
+        genres.forEach(g => {
+          genreCount.set(g, (genreCount.get(g) || 0) + 1);
+        });
+      }
+    });
+    const topGenres = Array.from(genreCount.entries())
+      .sort((a,b) => b[1] - a[1])
+      .slice(0,5)
+      .map(([name, count]) => ({ name, count }));
+
+    res.json({
+      totalWatched,
+      totalWant,
+      totalFavorite,
+      avgRating: Number(avgRating.toFixed(1)),
+      timeline,
+      topGenres
+    });
+  } catch (error) {
+    console.error('Stats error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Fallback для любых других запросов
 app.use((req, res, next) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
