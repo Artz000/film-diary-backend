@@ -69,3 +69,28 @@ export async function filterWatchedFilms(
   
   return recommendations.filter(rec => !watchedFilmIds.has(rec.filmId));
 }
+
+export async function getPopularRecommendations(userId: number, limit: number) {
+  const popularFilms = await prisma.film.findMany({
+    where: {
+      NOT: {
+        reviews: { some: { userId } }
+      }
+    },
+    include: {
+      _count: {
+        select: { reviews: true }
+      }
+    },
+    orderBy: {
+      reviews: { _count: 'desc' }
+    },
+    take: limit
+  });
+
+  return popularFilms.map(film => ({
+    filmId: film.id,
+    score: 0.5,
+    reasons: ['Популярный фильм среди пользователей']
+  }));
+}

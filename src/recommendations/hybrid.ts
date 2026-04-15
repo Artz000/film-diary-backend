@@ -23,6 +23,9 @@ export async function getHybridRecommendations(
   limit: number = 20
 ): Promise<RecommendationScore[]> {
   
+  console.log(`[Hybrid] Starting for user ${userId}`);
+  
+  // Проверяем кэш
   const cached = await prisma.recommendationCache.findMany({
     where: {
       userId,
@@ -33,21 +36,25 @@ export async function getHybridRecommendations(
   });
 
   if (cached.length >= limit) {
-    console.log(`[Recommendations] Using cached recommendations for user ${userId}`);
+    console.log(`[Hybrid] Using cached recommendations for user ${userId}`);
     return cached.map(c => ({
       filmId: c.filmId,
-      score: Number(c.score),
+      score: c.score,
       reasons: c.reasons as string[]
     }));
   }
 
-  console.log(`[Recommendations] Generating fresh recommendations for user ${userId}`);
+  console.log(`[Hybrid] Generating fresh recommendations for user ${userId}`);
 
+  // Получаем контентные и коллаборативные оценки
   const [contentScores, collabScores] = await Promise.all([
     getContentBasedScores(userId),
     getCollaborativeScores(userId)
   ]);
+  
+  console.log(`[Hybrid] Content scores size: ${contentScores.size}, Collab scores size: ${collabScores.size}`);
 
+  // Получаем популярные фильмы (для бонуса)
   const popularFilms = await prisma.film.findMany({
     where: {
       NOT: {
@@ -71,10 +78,13 @@ export async function getHybridRecommendations(
     popularityMap.set(film.id, film._count.reviews / maxReviews);
   }
 
+  // Объединяем все возможные filmId
   const allFilmIds = new Set([
     ...contentScores.keys(),
     ...collabScores.keys()
   ]);
+  
+  console.log(`[Hybrid] Total unique films: ${allFilmIds.size}`);
 
   const finalScores: RecommendationScore[] = [];
 
@@ -110,23 +120,29 @@ export async function getHybridRecommendations(
     }
   }
 
+  console.log(`[Hybrid] Final scores before filtering: ${finalScores.length}`);
+  
   const sorted = finalScores.sort((a, b) => b.score - a.score).slice(0, limit);
   
   const filtered = await filterWatchedFilms(userId, sorted);
+  
+  console.log(`[Hybrid] After filtering watched: ${filtered.length}`);
 
-  await prisma.recommendationCache.deleteMany({
-    where: { userId }
-  });
-
-  await prisma.recommendationCache.createMany({
-    data: filtered.map(rec => ({
-      userId,
-      filmId: rec.filmId,
-      score: rec.score,
-      reasons: rec.reasons,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000)
-    }))
-  });
+  // Сохраняем в кэш
+  if (filtered.length > 0) {
+    await prisma.recommendationCache.deleteMany({
+      where: { userId }
+    });
+    await prisma.recommendationCache.createMany({
+      data: filtered.map(rec => ({
+        userId,
+        filmId: rec.filmId,
+        score: rec.score,
+        reasons: rec.reasons,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000)
+      }))
+    });
+  }
 
   return filtered;
 }

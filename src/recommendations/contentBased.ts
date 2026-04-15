@@ -19,6 +19,7 @@ export async function getContentBasedScores(
     return new Map();
   }
 
+  // Используем прямой SQL для получения кандидатов
   const candidateFilms = await prisma.$queryRaw<any[]>`
     SELECT f.*, 
       COALESCE(AVG(r.rating), 0) as avg_rating
@@ -37,7 +38,19 @@ export async function getContentBasedScores(
     let totalScore = 0;
     const matchedGenres: string[] = [];
     
-    const filmGenres: string[] = film.genres || [];
+    // Получаем жанры: предполагаем, что genres уже массив (jsonb)
+    let filmGenres: string[] = [];
+    if (film.genres) {
+      if (Array.isArray(film.genres)) {
+        filmGenres = film.genres;
+      } else if (typeof film.genres === 'string') {
+        try {
+          filmGenres = JSON.parse(film.genres);
+        } catch (e) {
+          filmGenres = [];
+        }
+      }
+    }
     
     for (const genre of filmGenres) {
       const genreWeight = profile.favoriteGenres.get(genre) || 0;
@@ -45,8 +58,13 @@ export async function getContentBasedScores(
       if (genreWeight > 0) matchedGenres.push(genre);
     }
     
-    totalScore = totalScore / Math.max(filmGenres.length, 1);
+    if (filmGenres.length > 0) {
+      totalScore = totalScore / filmGenres.length;
+    } else {
+      totalScore = 0;
+    }
     
+    // Добавляем бонус за средний рейтинг фильма (нормализованный)
     const avgFilmRating = Number(film.avg_rating) || 0;
     totalScore += (avgFilmRating / 5) * 0.3;
     
