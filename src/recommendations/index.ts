@@ -1,59 +1,44 @@
 import express from 'express';
 import { prisma } from '../prisma';
-import { getHybridRecommendations } from './hybrid';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 
 router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res) => {
-  console.log(`[Recommendations] Request for user ${req.userId}`);
   try {
     const userId = req.userId!;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const refresh = req.query.refresh === 'true';
+    console.log(`[Recommendations] Request for user ${userId}`);
 
-    const userReviewsCount = await prisma.review.count({
-      where: { userId }
-    });
-
-    let recommendations;
-    let source = 'cache';
-
-    if (userReviewsCount < 3) {
-      recommendations = await getPopularRecommendations(userId, limit);
-      source = 'popular';
-    } else {
-      recommendations = await getHybridRecommendations(userId, undefined, limit);
-      source = 'hybrid';
-    }
-
-    const filmIds = recommendations.map(r => r.filmId);
-    const films = await prisma.film.findMany({
-      where: { id: { in: filmIds } }
-    });
-
-    const filmMap = new Map(films.map(f => [f.id, f]));
-
-    const result = recommendations.map(rec => ({
-      film: {
-        id: filmMap.get(rec.filmId)?.tmdbId,
-        title: filmMap.get(rec.filmId)?.title,
-        poster: filmMap.get(rec.filmId)?.posterPath,
-        year: filmMap.get(rec.filmId)?.year,
-        genres: filmMap.get(rec.filmId)?.genres
+    // Временно: возвращаем популярные фильмы (по количеству рецензий)
+    const popularFilms = await prisma.film.findMany({
+      take: 20,
+      orderBy: {
+        reviews: { _count: 'desc' }
       },
-      score: rec.score,
-      reasons: rec.reasons
+      include: {
+        _count: { select: { reviews: true } }
+      }
+    });
+
+    const result = popularFilms.map(film => ({
+      film: {
+        id: film.tmdbId,
+        title: film.title,
+        poster: film.posterPath,
+        year: film.year,
+        genres: film.genres
+      },
+      score: Math.min(0.5 + film._count.reviews / 100, 1.0),
+      reasons: ['Популярный фильм']
     }));
 
-    res.json({
-      recommendations: result,
-      source,
-      total: result.length
-    });
-    console.log(`[Recommendations] User ${userId} has ${userReviewsCount} reviews`);
+    // Отключаем кэширование
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json({ recommendations: result, source: 'popular', total: result.length });
   } catch (error) {
-    console.error('Error getting recommendations:', error);
+    console.error('[Recommendations] Error:', error);
     res.status(500).json({ error: 'Failed to get recommendations' });
   }
 });
@@ -62,59 +47,16 @@ router.post('/api/recommendations/feedback', authMiddleware, async (req: AuthReq
   try {
     const userId = req.userId!;
     const { filmId, feedback } = req.body;
-
     if (!filmId || !feedback) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-
-    await prisma.recommendationFeedback.upsert({
-      where: {
-        userId_filmId: { userId, filmId: Number(filmId) }
-      },
-      update: { feedback },
-      create: {
-        userId,
-        filmId: Number(filmId),
-        feedback
-      }
-    });
-
-    // Очищаем кэш рекомендаций для этого пользователя
-    await prisma.recommendationCache.deleteMany({
-      where: { userId }
-    });
-
-    console.log(`[Feedback] User ${userId} gave ${feedback} for film ${filmId}, cache cleared`);
+    // Здесь можно сохранять фидбек, но для заглушки просто ответим успехом
+    console.log(`[Feedback] User ${userId} gave ${feedback} for film ${filmId}`);
     res.json({ success: true });
   } catch (error) {
     console.error('Error saving feedback:', error);
     res.status(500).json({ error: 'Failed to save feedback' });
   }
 });
-
-async function getPopularRecommendations(userId: number, limit: number) {
-  const popularFilms = await prisma.film.findMany({
-    where: {
-      NOT: {
-        reviews: { some: { userId } }
-      }
-    },
-    include: {
-      _count: {
-        select: { reviews: true }
-      }
-    },
-    orderBy: {
-      reviews: { _count: 'desc' }
-    },
-    take: limit
-  });
-
-  return popularFilms.map(film => ({
-    filmId: film.id,
-    score: 0.5,
-    reasons: ['Популярный фильм среди пользователей']
-  }));
-}
 
 export default router;
