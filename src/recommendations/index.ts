@@ -9,14 +9,17 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
     const userId = req.userId!;
     console.log(`[Recommendations] Request for user ${userId}`);
 
-    // Временно: возвращаем популярные фильмы (по количеству рецензий)
     const popularFilms = await prisma.film.findMany({
       take: 20,
       orderBy: {
-        reviews: { _count: 'desc' }
+        reviews: {
+          _count: 'desc'
+        }
       },
       include: {
-        _count: { select: { reviews: true } }
+        _count: {
+          select: { reviews: true }
+        }
       }
     });
 
