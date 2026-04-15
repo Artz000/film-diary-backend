@@ -20,7 +20,8 @@ export const prisma = new PrismaClient();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://film-diary-frontend1.vercel.app'],
+  origin: ['http://localhost:5173', 'https://film-diary-frontend1.vercel.app','https://web.telegram.org',
+  'https://*.telegram.org'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
