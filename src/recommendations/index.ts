@@ -9,6 +9,13 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
     const userId = req.userId!;
     console.log(`[Recommendations] Request for user ${userId}`);
 
+    // Отключаем кэширование на всех уровнях
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('ETag', ''); // удаляем ETag, чтобы браузер не кэшировал
+
+    // Получаем топ-20 фильмов по количеству рецензий (популярные)
     const popularFilms = await prisma.film.findMany({
       take: 20,
       orderBy: {
@@ -23,6 +30,11 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
       }
     });
 
+    if (popularFilms.length === 0) {
+      console.log('[Recommendations] No films found in database');
+      return res.json({ recommendations: [], source: 'none', total: 0 });
+    }
+
     const result = popularFilms.map(film => ({
       film: {
         id: film.tmdbId,
@@ -35,11 +47,7 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
       reasons: ['Популярный фильм']
     }));
 
-    // Отключаем кэширование
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader('ETag', ''); // удаляем ETag
+    console.log(`[Recommendations] Returning ${result.length} popular films`);
     res.json({ recommendations: result, source: 'popular', total: result.length });
   } catch (error) {
     console.error('[Recommendations] Error:', error);
@@ -54,8 +62,8 @@ router.post('/api/recommendations/feedback', authMiddleware, async (req: AuthReq
     if (!filmId || !feedback) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    // Здесь можно сохранять фидбек, но для заглушки просто ответим успехом
     console.log(`[Feedback] User ${userId} gave ${feedback} for film ${filmId}`);
+    // Здесь можно сохранять фидбек, если нужно
     res.json({ success: true });
   } catch (error) {
     console.error('Error saving feedback:', error);
