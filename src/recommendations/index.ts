@@ -6,6 +6,7 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 const router = express.Router();
 
 router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res) => {
+  console.log(`[Recommendations] Request for user ${req.userId}`);
   try {
     const userId = req.userId!;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -50,6 +51,7 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
       source,
       total: result.length
     });
+    console.log(`[Recommendations] User ${userId} has ${userReviewsCount} reviews`);
   } catch (error) {
     console.error('Error getting recommendations:', error);
     res.status(500).json({ error: 'Failed to get recommendations' });
