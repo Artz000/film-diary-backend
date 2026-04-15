@@ -39,6 +39,7 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    res.setHeader('ETag', ''); // удаляем ETag
     res.json({ recommendations: result, source: 'popular', total: result.length });
   } catch (error) {
     console.error('[Recommendations] Error:', error);
