@@ -93,11 +93,12 @@ model RecommendationFeedback {
   id        Int      @id @default(autoincrement())
   userId    Int
   filmId    Int
-  feedback  String   // 'like', 'dislike', 'watched'
+  feedback  String
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   film Film @relation(fields: [filmId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, filmId])   // <-- добавьте эту строку
   @@index([userId])
 }
