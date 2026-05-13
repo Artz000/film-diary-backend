@@ -523,8 +523,9 @@ app.use((req, res, next) => {
   res.setHeader('Expires', '0');
   next();
 });
-app.use('*', (req, res) => res.status(200).send('OK'));
 app.use(recommendationsRouter);
+app.use('*', (req, res) => res.status(200).send('OK'));
+
 
 // Запуск сервера
 const server = app.listen(PORT, '0.0.0.0', () => {

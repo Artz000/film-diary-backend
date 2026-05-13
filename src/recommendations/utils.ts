@@ -34,7 +34,25 @@ export async function getUserProfile(userId: number): Promise<UserProfile> {
       highRatedFilms.push(review.filmId);
     }
 
-    const genres = review.film.genres as string[] || [];
+    // Получаем жанры из film.genres (тип JsonValue, Prisma)
+    let genres: string[] = [];
+    const filmGenres = review.film.genres;
+    if (filmGenres) {
+      if (Array.isArray(filmGenres)) {
+        // Если массив, проверяем, что все элементы строки
+        genres = filmGenres.filter(item => typeof item === 'string') as string[];
+      } else if (typeof filmGenres === 'string') {
+        try {
+          const parsed = JSON.parse(filmGenres);
+          if (Array.isArray(parsed)) {
+            genres = parsed.filter(item => typeof item === 'string');
+          }
+        } catch (e) {
+          console.error('Error parsing genres JSON:', e);
+        }
+      }
+    }
+
     genres.forEach(genre => {
       const weight = (review.rating || 0) / 5;
       favoriteGenres.set(genre, (favoriteGenres.get(genre) || 0) + weight);

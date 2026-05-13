@@ -25,7 +25,6 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
       source = 'hybrid';
     }
 
-    // Получаем полные данные фильмов
     const filmIds = recommendations.map(r => r.filmId);
     const films = await prisma.film.findMany({
       where: { id: { in: filmIds } }
@@ -62,13 +61,11 @@ router.post('/api/recommendations/feedback', authMiddleware, async (req: AuthReq
     if (!filmId || !feedback) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    // Сохраняем фидбек в таблицу (если она есть)
     await prisma.recommendationFeedback.upsert({
       where: { userId_filmId: { userId, filmId: Number(filmId) } },
       update: { feedback },
       create: { userId, filmId: Number(filmId), feedback }
     });
-    // Очищаем кэш
     await prisma.recommendationCache.deleteMany({ where: { userId } });
     console.log(`[Feedback] User ${userId} gave ${feedback} for film ${filmId}, cache cleared`);
     res.json({ success: true });

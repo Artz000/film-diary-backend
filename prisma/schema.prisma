@@ -12,12 +12,14 @@ model User {
   email     String   @unique
   passwordHash String
   name      String?
+
   reviews   Review[]
   followers Follow[] @relation("follows")
   following Follow[] @relation("followedBy")
   likes     Like[]
-  recommendationCache   RecommendationCache[]   // добавлено
-  recommendationFeedback RecommendationFeedback[] // добавлено
+
+  recommendationCache   RecommendationCache[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 model Film {
@@ -26,42 +28,48 @@ model Film {
   title      String
   posterPath String?
   year       String?
-  genres     Json?
+  genres     Json?    // хранит массив строк (JSON)
+
   reviews    Review[]
-  recommendationCache   RecommendationCache[]   // добавлено
-  recommendationFeedback RecommendationFeedback[] // добавлено
+  recommendationCache   RecommendationCache[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 model Review {
   id         Int      @id @default(autoincrement())
-  user       User     @relation(fields: [userId], references: [id])
   userId     Int
-  film       Film     @relation(fields: [filmId], references: [id])
   filmId     Int
-  status     String
+  status     String   // 'watched', 'want', 'favorite'
   rating     Int?
   reviewText String?
   createdAt  DateTime @default(now())
   isPublic   Boolean  @default(false)
   isFavorite Boolean  @default(false)
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  film       Film     @relation(fields: [filmId], references: [id], onDelete: Cascade)
   likes      Like[]
+
+  @@unique([userId, filmId])
 }
 
 model Follow {
   id          Int   @id @default(autoincrement())
-  follower    User  @relation("follows", fields: [followerId], references: [id])
   followerId  Int
-  following   User  @relation("followedBy", fields: [followingId], references: [id])
   followingId Int
+
+  follower   User @relation("follows", fields: [followerId], references: [id], onDelete: Cascade)
+  following  User @relation("followedBy", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
 }
 
 model Like {
-  user     User   @relation(fields: [userId], references: [id])
   userId   Int
-  review   Review @relation(fields: [reviewId], references: [id])
   reviewId Int
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@id([userId, reviewId])
 }
@@ -71,13 +79,14 @@ model RecommendationCache {
   userId    Int
   filmId    Int
   score     Float
-  reasons   Json      // массив строк
+  reasons   Json     // массив строк
   expiresAt DateTime
-  user      User     @relation(fields: [userId], references: [id])
-  film      Film     @relation(fields: [filmId], references: [id])
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  film Film @relation(fields: [filmId], references: [id], onDelete: Cascade)
 
   @@unique([userId, filmId])
-  @@index([userId])
+  @@index([userId, expiresAt])
 }
 
 model RecommendationFeedback {
@@ -86,9 +95,9 @@ model RecommendationFeedback {
   filmId    Int
   feedback  String   // 'like', 'dislike', 'watched'
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-  film      Film     @relation(fields: [filmId], references: [id])
 
-  @@unique([userId, filmId])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  film Film @relation(fields: [filmId], references: [id], onDelete: Cascade)
+
   @@index([userId])
 }

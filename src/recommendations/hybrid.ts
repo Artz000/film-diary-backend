@@ -60,6 +60,8 @@ export async function getHybridRecommendations(
   }
 
   const allFilmIds = new Set([...contentScores.keys(), ...collabScores.keys()]);
+  console.log(`[Hybrid] Total unique films: ${allFilmIds.size}`);
+
   const finalScores: RecommendationScore[] = [];
 
   for (const filmId of allFilmIds) {
@@ -85,9 +87,10 @@ export async function getHybridRecommendations(
     }
   }
 
+  console.log(`[Hybrid] Final scores before filtering: ${finalScores.length}`);
   const sorted = finalScores.sort((a, b) => b.score - a.score).slice(0, limit);
   const filtered = await filterWatchedFilms(userId, sorted);
-  console.log(`[Hybrid] Final recommendations: ${filtered.length}`);
+  console.log(`[Hybrid] After filtering watched: ${filtered.length}`);
 
   if (filtered.length > 0) {
     await prisma.recommendationCache.deleteMany({ where: { userId } });
