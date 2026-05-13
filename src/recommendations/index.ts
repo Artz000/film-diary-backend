@@ -57,15 +57,26 @@ router.get('/api/recommendations', authMiddleware, async (req: AuthRequest, res)
 router.post('/api/recommendations/feedback', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.userId!;
-    const { filmId, feedback } = req.body;
+    const { filmId, feedback } = req.body; // filmId - это tmdbId (внешний id)
     if (!filmId || !feedback) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    await prisma.recommendationFeedback.upsert({
-      where: { userId_filmId: { userId, filmId: Number(filmId) } },
-      update: { feedback },
-      create: { userId, filmId: Number(filmId), feedback }
+
+    // Находим фильм по tmdbId
+    const film = await prisma.film.findUnique({
+      where: { tmdbId: Number(filmId) }
     });
+    if (!film) {
+      return res.status(404).json({ error: 'Film not found' });
+    }
+
+    // Сохраняем фидбек, используя внутренний film.id
+    await prisma.recommendationFeedback.upsert({
+      where: { userId_filmId: { userId, filmId: film.id } }, // составной ключ (нужно добавить в схему)
+      update: { feedback },
+      create: { userId, filmId: film.id, feedback }
+    });
+    // Очищаем кэш
     await prisma.recommendationCache.deleteMany({ where: { userId } });
     console.log(`[Feedback] User ${userId} gave ${feedback} for film ${filmId}, cache cleared`);
     res.json({ success: true });
